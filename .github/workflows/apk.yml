@@ -2,7 +2,8 @@ name: Construir APK INTERFREE TV
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -11,32 +12,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
-
-      - name: Descomprimir proyecto visual
-        shell: bash
-        run: |
-          set -euo pipefail
-          ZIP_FILE="./InterfreeTV_catalogo_visual.zip"
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: No se encuentra $ZIP_FILE en la raíz del repositorio."
-            echo "Archivos disponibles:"
-            ls -la
-            exit 1
-          fi
-          mkdir -p ./proyecto_extraido
-          unzip -q "$ZIP_FILE" -d ./proyecto_extraido
-          PROJECT_FILE="$(find ./proyecto_extraido -type f -name settings.gradle.kts -print -quit)"
-          if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: No se encontró settings.gradle.kts dentro del ZIP."
-            find ./proyecto_extraido -maxdepth 4 -type f | head -80
-            exit 1
-          fi
-          PROJECT_DIR="$(dirname "$PROJECT_FILE")"
-          echo "Proyecto encontrado en: $PROJECT_DIR"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Preparar Java 17
         uses: actions/setup-java@v4
@@ -46,26 +25,73 @@ jobs:
 
       - name: Preparar Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Instalar Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Aceptar licencias del SDK
+      - name: Localizar y descomprimir el proyecto Android
         shell: bash
-        run: yes | sdkmanager --licenses || true
+        run: |
+          set -euo pipefail
+          mkdir -p proyecto_extraido
+
+          ZIP_FILE=""
+          while IFS= read -r candidate; do
+            if unzip -Z1 "$candidate" | grep -qE '(^|/)settings\.gradle\.kts$'; then
+              ZIP_FILE="$candidate"
+              break
+            fi
+          done < <(find . -maxdepth 1 -type f -iname '*.zip' -print | sort)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No se encontró un ZIP con settings.gradle.kts."
+            find . -maxdepth 1 -type f -iname '*.zip' -print || true
+            exit 1
+          fi
+
+          echo "Proyecto ZIP encontrado: $ZIP_FILE"
+          unzip -q "$ZIP_FILE" -d ./proyecto_extraido
+
+          SETTINGS_FILE="$(find ./proyecto_extraido -type f -name settings.gradle.kts -print -quit)"
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: El ZIP no contiene settings.gradle.kts."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Proyecto Android ubicado en: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
 
       - name: Construir APK
         shell: bash
-        run: gradle -p "$PROJECT_DIR" :app:assembleDebug --stacktrace
+        run: |
+          set -euo pipefail
+          gradle -p "$PROJECT_DIR" --no-daemon :app:assembleDebug
 
-      - name: Publicar APK como artefacto
+          APK_PATH="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK_PATH" ]; then
+            echo "ERROR: No se encontró el APK esperado."
+            find "$PROJECT_DIR/app/build/outputs" -maxdepth 5 -type f -print 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
+          ls -lh "$APK_PATH"
+
+      - name: Guardar APK como artefacto descargable
         uses: actions/upload-artifact@v4
         with:
           name: INTERFREE-TV-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 14
 
       - name: Crear release de prueba
         env:
@@ -73,8 +99,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APK_PATH="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
           TAG="v1.4-build${GITHUB_RUN_NUMBER}"
+
           gh release create "$TAG" "$APK_PATH" \
             --title "INTERFREE TV 1.4 (build ${GITHUB_RUN_NUMBER})" \
             --notes "APK de prueba generado automáticamente por GitHub Actions."
