@@ -2,13 +2,10 @@
 name: Construir APK INTERFREE TV
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -27,84 +24,54 @@ jobs:
       - name: Preparar Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Instalar componentes Android
+      - name: Aceptar licencias e instalar Android SDK
         shell: bash
         run: |
           yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Instalar Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Descomprimir proyecto INTERFREE TV nuevo
+      - name: Extraer proyecto corregido
         shell: bash
         run: |
-          set -euo pipefail
-
-          ZIP_FILE="./InterfreeTV_diseno_nuevo.zip"
+          set -e
+          ZIP_FILE="InterfreeTV_diseno_nuevo_corregido.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: No se encuentra $ZIP_FILE"
-            ls -la
+            echo "ERROR: No se encontró $ZIP_FILE"
             exit 1
           fi
 
           mkdir -p proyecto_extraido
           unzip -q "$ZIP_FILE" -d proyecto_extraido
 
-          SETTINGS_FILE="$(find proyecto_extraido -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
+          SETTINGS_FILE=$(find proyecto_extraido -name settings.gradle.kts -print -quit)
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: No se encontró settings.gradle"
-            find proyecto_extraido -maxdepth 4 -type f
+            echo "ERROR: No se encontró settings.gradle.kts"
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
-
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Proyecto nuevo localizado:"
-          echo "$PROJECT_DIR"
+          echo "Proyecto encontrado:"
           ls -la "$PROJECT_DIR"
 
       - name: Construir APK
         shell: bash
         run: |
-          set -euo pipefail
-
+          set -e
           gradle -p "$PROJECT_DIR" --no-daemon :app:assembleDebug
 
-          APK_PATH="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -f "$APK_PATH" ]; then
-            echo "ERROR: No se encontró el APK"
-            find "$PROJECT_DIR/app/build/outputs" -type f
-            exit 1
-          fi
-
-          echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
-          ls -lh "$APK_PATH"
-
-      - name: Publicar APK descargable
+      - name: Guardar APK descargable
         uses: actions/upload-artifact@v4
         with:
-          name: INTERFREE-TV-NUEVO-DISENO
-          path: ${{ env.APK_PATH }}
+          name: INTERFREE-TV-debug
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
-
-      - name: Crear release de prueba
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          TAG="interfree-tv-v2-build-${GITHUB_RUN_NUMBER}"
-
-          gh release create "$TAG" "$APK_PATH" \
-            --title "INTERFREE TV - Nuevo diseño" \
-            --notes "APK de prueba compilado desde InterfreeTV_diseno_nuevo.zip"
