@@ -1,8 +1,11 @@
 
-name: Construir APK INTERFREE TV
+name: Construir INTERFREE TV 1.5
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -24,54 +27,56 @@ jobs:
       - name: Preparar Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Aceptar licencias e instalar Android SDK
-        shell: bash
+      - name: Aceptar licencias e instalar SDK
         run: |
           yes | sdkmanager --licenses || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Instalar Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Extraer proyecto corregido
+      - name: Extraer exclusivamente INTERFREE TV 1.5
         shell: bash
         run: |
-          set -e
-          ZIP_FILE="InterfreeTV_diseno_nuevo_corregido.zip"
+          set -euo pipefail
 
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: No se encontró $ZIP_FILE"
+          ZIP="InterfreeTV_1.5.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: No existe $ZIP en la raiz."
             exit 1
           fi
 
-          mkdir -p proyecto_extraido
-          unzip -q "$ZIP_FILE" -d proyecto_extraido
+          mkdir proyecto15
+          unzip -q "$ZIP" -d proyecto15
 
-          SETTINGS_FILE=$(find proyecto_extraido -name settings.gradle.kts -print -quit)
+          PROJECT="proyecto15/InterfreeTV"
 
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: No se encontró settings.gradle.kts"
-            exit 1
-          fi
+          test -f "$PROJECT/settings.gradle.kts"
+          test -f "$PROJECT/app/build.gradle.kts"
+          test -f "$PROJECT/app/src/main/java/com/interfree/tv/MainActivity.kt"
+          test -f "$PROJECT/app/src/main/java/com/interfree/tv/Data.kt"
 
-          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          grep -q 'versionName = "1.5"' "$PROJECT/app/build.gradle.kts"
 
-          echo "Proyecto encontrado:"
-          ls -la "$PROJECT_DIR"
+          echo "Proyecto confirmado: INTERFREE TV 1.5"
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
-      - name: Construir APK
-        shell: bash
+      - name: Compilar APK
         run: |
-          set -e
-          gradle -p "$PROJECT_DIR" --no-daemon :app:assembleDebug
+          gradle -p "$PROJECT" --no-daemon :app:assembleDebug
 
-      - name: Guardar APK descargable
+      - name: Verificar APK
+        run: |
+          test -f "$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
+          ls -lh "$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
+
+      - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: INTERFREE-TV-debug
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          name: INTERFREE-TV-1.5
+          path: proyecto15/InterfreeTV/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
