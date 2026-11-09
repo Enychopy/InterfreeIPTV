@@ -1,0 +1,35 @@
+INTERFREE TV 1.5 - reproductor IPTV Xtream Codes (telefono y Android TV)
+
+1. Abre esta carpeta con Android Studio y deja que sincronice Gradle.
+2. El servidor no esta fijado: cada usuario escribe la direccion de su proveedor Xtream Codes en el inicio de sesion.
+   Formato habitual: http://servidor:puerto o https://servidor:puerto.
+3. Run en un celular o emulador. Para el APK: Build > Build APK(s).
+
+Incluye: inicio de sesion Xtream, datos de la cuenta (vence, conexiones), en vivo, peliculas, series
+con episodios, categorias, busqueda y favoritos. No incluye canales: muestra lo que entregue tu servidor.
+
+Marca: usa el logo oficial de INTERFREE TV (television con antenas y boton de reproducir).
+- Icono: res/mipmap-*/ic_launcher.png y res/drawable-nodpi/ic_launcher_fg.png (icono adaptable)
+- Banner de Android TV: res/drawable-xhdpi/banner.png
+- Pantalla de inicio e inicio de sesion: res/drawable-nodpi/logo_full.jpg
+- Marca pequena del encabezado: res/drawable-nodpi/logo_mark.png
+- Colores: res/values/colors.xml (fondo #030515, azul, rojo, violeta del logo)
+
+Version 1.4: logos en los canales y portadas en peliculas y series (cuadricula de posters).
+
+Version 1.5: interfaz estilo IBO Player: inicio con tres botones grandes (TV en vivo, Peliculas, Series),
+categorias a la izquierda, vista previa del canal a la derecha, cuadricula de portadas y navegacion con control remoto.
+
+
+ACTUALIZACION DE TRABAJO - etapa 1:
+- Se elimino el servidor Xtream fijado en el codigo; ahora se solicita el servidor al iniciar sesion.
+- Se agrego soporte de DASH como dependencia Media3.
+- El reproductor principal usa buffer ampliado, selector de pistas de audio, selector de subtitulos integrados y reintentos basicos ante errores recuperables.
+- La seleccion de pistas depende de que el proveedor incluya esas pistas en el stream.
+- El cambio automatico de calidad requiere que el proveedor ofrezca un stream adaptativo HLS/DASH con varias calidades.
+
+COMPILACION CON GITHUB ACTIONS:
+- Sube el contenido de esta carpeta al repositorio (incluida .github/workflows/android.yml).
+- En GitHub abre Actions y ejecuta "Build INTERFREE TV" con Run workflow.
+- Al terminar, descarga el artefacto INTERFREE-TV-debug para obtener el APK.
+- Este ZIP no incluye Android Studio ni requiere incluir un gradlew generado localmente.
