@@ -39,15 +39,15 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Extraer exclusivamente INTERFREE TV 1.5
+      - name: Extraer INTERFREE TV 1.5 corregido
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="InterfreeTV_1.5.zip"
+          ZIP="INTERFREE_TV_1.5_etapa4_logo_rojo_corregido.zip"
 
           if [ ! -f "$ZIP" ]; then
-            echo "ERROR: No existe $ZIP en la raiz."
+            echo "ERROR: No existe $ZIP en la raiz del repositorio."
             exit 1
           fi
 
@@ -63,7 +63,8 @@ jobs:
 
           grep -q 'versionName = "1.5"' "$PROJECT/app/build.gradle.kts"
 
-          echo "Proyecto confirmado: INTERFREE TV 1.5"
+          echo "Proyecto confirmado: INTERFREE TV 1.5 - LOGO ROJO"
+          echo "ZIP utilizado: $ZIP"
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
       - name: Compilar APK
@@ -78,7 +79,7 @@ jobs:
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: INTERFREE-TV-1.5
+          name: INTERFREE-TV-1.5-LOGO-ROJO
           path: proyecto15/InterfreeTV/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
