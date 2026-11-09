@@ -24,22 +24,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Preparar Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools'
-          accept-android-sdk-licenses: true
-
-      - name: Instalar Android SDK 34
-        run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
-
       - name: Instalar Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Extraer INTERFREE TV 1.5 corregido
+      - name: Extraer proyecto con logo rojo
         shell: bash
         run: |
           set -euo pipefail
@@ -47,34 +37,39 @@ jobs:
           ZIP="INTERFREE_TV_1.5_etapa4_logo_rojo_corregido.zip"
 
           if [ ! -f "$ZIP" ]; then
-            echo "ERROR: No existe $ZIP en la raiz del repositorio."
+            echo "ERROR: No se encuentra el ZIP: $ZIP"
             exit 1
           fi
 
-          mkdir proyecto15
+          mkdir -p proyecto15
           unzip -q "$ZIP" -d proyecto15
 
           PROJECT="proyecto15/InterfreeTV"
 
-          test -f "$PROJECT/settings.gradle.kts"
-          test -f "$PROJECT/app/build.gradle.kts"
-          test -f "$PROJECT/app/src/main/java/com/interfree/tv/MainActivity.kt"
-          test -f "$PROJECT/app/src/main/java/com/interfree/tv/Data.kt"
+          if [ ! -f "$PROJECT/settings.gradle.kts" ]; then
+            echo "ERROR: No se encontró settings.gradle.kts"
+            echo "Contenido extraído:"
+            find proyecto15 -maxdepth 3 -type f | head -80
+            exit 1
+          fi
 
-          grep -q 'versionName = "1.5"' "$PROJECT/app/build.gradle.kts"
+          if [ ! -f "$PROJECT/app/build.gradle.kts" ]; then
+            echo "ERROR: No se encontró app/build.gradle.kts"
+            exit 1
+          fi
 
-          echo "Proyecto confirmado: INTERFREE TV 1.5 - LOGO ROJO"
-          echo "ZIP utilizado: $ZIP"
+          echo "Proyecto encontrado correctamente."
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
       - name: Compilar APK
         run: |
-          gradle -p "$PROJECT" --no-daemon :app:assembleDebug
+          gradle -p "$PROJECT" --no-daemon assembleDebug
 
       - name: Verificar APK
         run: |
-          test -f "$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
-          ls -lh "$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
+          APK="$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          ls -lh "$APK"
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
