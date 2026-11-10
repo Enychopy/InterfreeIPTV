@@ -14,57 +14,79 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
 
       - name: Descomprimir proyecto
         run: |
-          rm -rf InterfreeTV
           unzip -oq InterfreeTV_diseno_nuevo.zip
-          grep -n "versionName" InterfreeTV/app/build.gradle.kts
+          test -d InterfreeTV/app
 
-      - name: Instalar MainActivity corregido
+      - name: Instalar archivos corregidos
         run: |
-          f=InterfreeTV/app/src/main/java/com/interfree/tv/MainActivity.kt
+          APP="InterfreeTV/app/src/main/java/com/interfree/tv"
+
+          # Instalar MainActivity corregido
           test -f MainActivity_corregido.kt
-          cp MainActivity_corregido.kt "$f"
-          echo "MainActivity corregido instalado"
+          cp MainActivity_corregido.kt "$APP/MainActivity.kt"
 
-      - name: Corregir reproductor
-        run: |
-          f=InterfreeTV/app/src/main/java/com/interfree/tv/MainActivity.kt
-          if grep -q '^ *setSeekBackIncrementMs' "$f"; then
-            sed -i '/^ *setSeekBackIncrementMs(300_000L)$/d;/^ *setSeekForwardIncrementMs(300_000L)$/d' "$f"
-            sed -i 's/\.setTrackSelector(trackSelector)$/.setTrackSelector(trackSelector).setSeekBackIncrementMs(300_000L).setSeekForwardIncrementMs(300_000L)/' "$f"
+          # Instalar Data.kt corregido
+          if [ -f Data_corregido_orden_canales.kt ]; then
+            cp Data_corregido_orden_canales.kt "$APP/Data.kt"
+          elif [ -f Data.kt ]; then
+            cp Data.kt "$APP/Data.kt"
+          else
+            echo "ERROR: No se encontró el Data.kt corregido"
+            exit 1
           fi
-          sed -i 's/trackSelector, C\.TRACK_TYPE/player, C.TRACK_TYPE/' "$f"
-          grep -n "SeekBackIncrementMs\|TrackSelectionDialogBuilder(" "$f"
 
-      - uses: actions/setup-java@v4
+          echo "Archivos corregidos instalados:"
+          ls -l "$APP/MainActivity.kt" "$APP/Data.kt"
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Aceptar licencias del SDK
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Aceptar licencias Android
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
-      - name: Construir
+      - name: Compilar INTERFREE TV
         shell: bash
-        run: gradle -p InterfreeTV assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+        run: |
+          gradle -p InterfreeTV assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
 
-      - name: Publicar APK
+      - name: Preparar APK
+        run: |
+          cp InterfreeTV/app/build/outputs/apk/debug/app-debug.apk InterfreeTV.apk
+          ls -lh InterfreeTV.apk
+
+      - name: Publicar APK en Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp InterfreeTV/app/build/outputs/apk/debug/app-debug.apk InterfreeTV.apk
-          gh release create "v1.3-${{ github.run_number }}" InterfreeTV.apk --title "INTERFREE TV (build ${{ github.run_number }})" --notes "APK de prueba"
+          TAG="v1.3-${{ github.run_number }}"
+          gh release create "$TAG" InterfreeTV.apk \
+            --title "INTERFREE TV ($TAG)" \
+            --notes "Nueva compilación de INTERFREE TV"
 
-      - name: Guardar registro
+      - name: Guardar APK como Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: INTERFREE-TV-APK
+          path: InterfreeTV.apk
+
+      - name: Guardar registro de compilación
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: build.log
+          if-no-files-found: ignore
