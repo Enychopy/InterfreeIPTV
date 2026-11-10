@@ -66,6 +66,8 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -174,17 +176,29 @@ fun App() {
         }
     }
 
-    LaunchedEffect(session, section, reload) {
+    // Precarga los tres catálogos en paralelo al iniciar sesión.
+    // Así, al cambiar entre TV, películas y series, los datos ya estarán en memoria.
+    LaunchedEffect(session, reload) {
         val s1 = session ?: return@LaunchedEffect
-        val sec1 = section ?: return@LaunchedEffect
-        if (data[sec1] == null) {
-            error = ""
-            try {
-                val list = withContext(Dispatchers.IO) { Xt.catalog(s1.base, s1.user, s1.pass, sec1) }
-                data = data + (sec1 to list)
-            } catch (e: Exception) {
-                error = "No se pudo cargar: ${e.message}"
-            }
+        error = ""
+        coroutineScope {
+            (0..2).map { sec1 ->
+                launch {
+                    // No repetir una descarga si el catálogo ya está disponible.
+                    if (data[sec1] == null) {
+                        try {
+                            val list = withContext(Dispatchers.IO) {
+                                Xt.catalog(s1.base, s1.user, s1.pass, sec1)
+                            }
+                            data = data + (sec1 to list)
+                        } catch (e: Exception) {
+                            if (error.isBlank()) {
+                                error = "No se pudo cargar ${listOf("canales", "películas", "series")[sec1]}: ${e.message}"
+                            }
+                        }
+                    }
+                }
+            }.joinAll()
         }
     }
 
@@ -263,30 +277,7 @@ fun App() {
                     favs = if (key in favs) favs - key else favs + key
                     prefs.edit().putStringSet("favs", favs).apply()
                 },
-                onBack = { section = null }
-            )
-        }
-
-        // El reproductor solo existe mientras se ve en pantalla completa.
-        // Al volver atrás se libera y el audio se detiene.
-        if (!splash && cur != null && playerVisible) {
-            PlayerScreen(
-                url = cur.second,
-                onBack = {
-                    // En TV en vivo se regresa a la lista y se conserva el canal
-                    // seleccionado para que PreviewPane lo muestre en el recuadro.
-                    // En películas y episodios, el reproductor se desmonta y se
-                    // detiene completamente antes de volver a su pantalla anterior.
-                    playerVisible = false
-                    playing = null
-                }
-            )
-        }
-    }
-
-}
-
-@Composable
+                onBack = { section = null }@Composable
 fun rememberClock(): String {
     var t by remember { mutableStateOf(nowText()) }
     LaunchedEffect(Unit) {
@@ -568,23 +559,7 @@ fun CategoryPane(
         modifier.clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(6.dp)
-    ) {
-        items(groups) { g ->
-            val isSel = g == cat
-            val n: Int? = when (g) {
-                "Todos" -> total
-                "Favoritos" -> null
-                else -> counts[g]
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                    .tvFocus(RoundedCornerShape(10.dp)) { onCat(g) }
-                    .background(if (isSel) Blue.copy(alpha = 0.35f) else Color.Transparent)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    g, Modifier.weight(1f), maxLines = 1,
+    ) {                    g, Modifier.weight(1f), maxLines = 1,
                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
                 )
                 if (n != null) {
@@ -640,7 +615,6 @@ fun PreviewPlayer(url: String, modifier: Modifier = Modifier, paused: Boolean = 
         player.setMediaItem(MediaItem.fromUri(url))
         player.prepare()
     }
-    // Mientras el canal se ve en pantalla completa, la vista previa se pausa (sin doble audio).
     LaunchedEffect(paused) {
         if (paused) {
             player.pause()
@@ -689,404 +663,224 @@ fun LiveRow(item: Item, fav: Boolean, selected: Boolean, onClick: () -> Unit, on
 }
 
 @Composable
-fun PosterCard(item: Item, fav: Boolean, onOpen: () -> Unit, onFav: () -> Unit) {
-    Column(Modifier.tvFocus(RoundedCornerShape(12.dp), onOpen)) {
-        Box(
-            Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Text(
-                item.name.take(1).uppercase(), Modifier.align(Alignment.Center),
-                style = MaterialTheme.typography.headlineLarge
+fun PosterCard(item: Item, fav: Boolean, onClick: () -> Unit, onFav: () -> Unit) {
+    Column(
+        Modifier.tvFocus(RoundedCornerShape(12.dp), onClick)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Box {
+            AsyncImage(
+                model = item.icon,
+                contentDescription = item.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxWidth().aspectRatio(0.68f)
+                    .clip(RoundedCornerShape(12.dp))
             )
-            if (item.icon.isNotBlank()) {
-                AsyncImage(
-                    model = item.icon, contentDescription = item.name,
-                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
-                )
+            TextButton(onClick = onFav, modifier = Modifier.align(Alignment.TopEnd)) {
+                Text(if (fav) "★" else "☆", color = Color.White)
             }
-            Text(
-                if (fav) "★" else "☆",
-                Modifier.align(Alignment.TopEnd).clickable { onFav() }.padding(8.dp),
-                color = Color.White
-            )
         }
         Text(
-            item.name, maxLines = 2, style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp, bottom = 2.dp)
+            item.name, Modifier.padding(7.dp),
+            maxLines = 2, style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }
 
-// ---------------------------------------------------------------- Episodios, reproductor, acceso
+// ---------------------------------------------------------------- Detalles
 
 @Composable
 fun MovieDetailScreen(item: Item, onPlay: () -> Unit, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
-    BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
-        val wide = maxWidth >= 640.dp
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Box(Modifier.fillMaxSize().background(Bg)) {
+        AsyncImage(
+            model = item.icon, contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize().alpha(0.25f)
+        )
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
             TextButton(onClick = onBack) { Text("‹ Volver") }
-            if (wide) Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                PosterArtwork(item.icon, item.name, Modifier.width(230.dp).fillMaxHeight())
-                MovieMetadata(item, onPlay, Modifier.weight(1f).fillMaxHeight())
-            } else Column(Modifier.fillMaxSize()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    PosterArtwork(item.icon, item.name, Modifier.width(112.dp).aspectRatio(2f / 3f))
-                    Column(Modifier.weight(1f)) {
-                        Text(item.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        MetadataLine(item)
-                    }
-                }
-                Spacer(Modifier.height(14.dp))
-                Text(item.plot.ifBlank { "El proveedor no proporcionó una sinopsis para esta película." })
-                Spacer(Modifier.height(18.dp))
-                Button(onClick = onPlay) { Text("▶  Reproducir película") }
-            }
+            Text(item.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(12.dp))
+            Text(item.group, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(20.dp))
+            Button(onClick = onPlay) { Text("▶  Reproducir") }
         }
     }
 }
 
 @Composable
-private fun MovieMetadata(item: Item, onPlay: () -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Text(item.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp)); MetadataLine(item); Spacer(Modifier.height(16.dp))
-        Text("SINOPSIS", color = Blue, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(6.dp))
-        Text(item.plot.ifBlank { "El proveedor no proporcionó una sinopsis para esta película." })
-        Spacer(Modifier.height(20.dp)); Button(onClick = onPlay) { Text("▶  Reproducir película") }
-    }
-}
-
-@Composable
-private fun MetadataLine(item: Item) {
-    val fields = listOf(item.year, item.genre, item.duration, item.rating.takeIf { it.isNotBlank() }?.let { "★ $it" } ?: "").filter { it.isNotBlank() }
-    if (fields.isNotEmpty()) Text(fields.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-}
-
-@Composable
-private fun PosterArtwork(url: String, title: String, modifier: Modifier) {
-    Box(modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-        Text(title.take(1).uppercase(), style = MaterialTheme.typography.headlineLarge)
-        if (url.isNotBlank()) AsyncImage(model = url, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-    }
-}
-
-@Composable
-fun EpisodesScreen(title: String, cover: String, info: SeriesInfo?, eps: List<Episode>?, onPlay: (Episode) -> Unit, onBack: () -> Unit) {
+fun EpisodesScreen(
+    title: String,
+    icon: String,
+    info: SeriesInfo?,
+    episodes: List<Episode>?,
+    onPlay: (Episode) -> Unit,
+    onBack: () -> Unit
+) {
     BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(Bg).padding(12.dp)) {
+    Column(Modifier.fillMaxSize().background(Bg).padding(16.dp)) {
         TextButton(onClick = onBack) { Text("‹ Volver") }
-        Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            PosterArtwork(cover, title, Modifier.width(100.dp).aspectRatio(2f / 3f))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(
+                model = icon, contentDescription = null,
+                modifier = Modifier.size(90.dp).clip(RoundedCornerShape(12.dp)),
+                contentScale = ContentScale.Crop
+            )
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
+            Column {
                 Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                val meta = listOfNotNull(info?.year?.takeIf { it.isNotBlank() }, info?.genre?.takeIf { it.isNotBlank() }, info?.rating?.takeIf { it.isNotBlank() }?.let { "★ $it" }).joinToString(" · ")
-                if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.bodySmall)
+                Text(info?.plot ?: "", maxLines = 3, style = MaterialTheme.typography.bodySmall)
             }
         }
-        if (!info?.plot.isNullOrBlank()) Text(info!!.plot, style = MaterialTheme.typography.bodySmall, maxLines = 4)
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(16.dp))
         when {
-            eps == null -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            eps.isEmpty() -> Text("No hay episodios disponibles")
+            episodes == null -> CircularProgressIndicator()
+            episodes.isEmpty() -> Text("No hay episodios disponibles")
             else -> LazyColumn {
-                items(eps) { e ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).tvFocus(RoundedCornerShape(10.dp)) { onPlay(e) }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        PosterArtwork(e.icon, e.title, Modifier.size(width = 76.dp, height = 52.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(e.title, fontWeight = FontWeight.SemiBold, maxLines = 2)
-                            if (e.plot.isNotBlank()) Text(e.plot, style = MaterialTheme.typography.bodySmall, maxLines = 2, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            val extra = listOf(e.duration, e.rating.takeIf { it.isNotBlank() }?.let { "★ $it" } ?: "").filter { it.isNotBlank() }.joinToString(" · ")
-                            if (extra.isNotBlank()) Text(extra, style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
+                items(episodes) { ep ->
+                    ListItem(
+                        headlineContent = { Text(ep.title) },
+                        supportingContent = { Text(ep.seasonEpisode) },
+                        modifier = Modifier.clickable { onPlay(ep) }
+                    )
                 }
             }
         }
     }
 }
-
-private fun findHttpStatus(error: PlaybackException): Int? {
-    var cause: Throwable? = error
-    while (cause != null) {
-        if (cause is HttpDataSource.InvalidResponseCodeException) return cause.responseCode
-        cause = cause.cause
-    }
-    return null
-}
-
-@Composable
+        items(groups) { g ->
+            val isSel = g == cat
+            val n: Int? = when (g) {
+                "Todos" -> total
+                "Favoritos" -> null
+                else -> counts[g]
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                    .tvFocus(RoundedCornerShape(10.dp)) { onCat(g) }
+                    .background(if (isSel) Blue.copy(alpha = 0.35f) else Color.Transparent)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+            )@Composable
 fun PlayerScreen(url: String, onBack: () -> Unit) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var playbackError by remember { mutableStateOf("") }
-    var retryCount by remember { mutableIntStateOf(0) }
-    var showQualityMenu by remember { mutableStateOf(false) }
-    var qualityMode by remember { mutableStateOf("Automática") }
-    var menuOpen by remember { mutableStateOf(false) }
-    val rootFocus = remember { FocusRequester() }
-    val firstButtonFocus = remember { FocusRequester() }
-    val playerViewHolder = remember { arrayOfNulls<PlayerView>(1) }
-
-    // Buffer amplio para absorber variaciones normales de redes Wi-Fi y moviles.
-    // No puede corregir una fuente caida ni crear calidades que el proveedor no entregue.
-    val loadControl = remember {
-        DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15_000, 50_000, 1_500, 3_000)
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .build()
-    }
-    // ExoPlayer selecciona automáticamente entre las variantes HLS/DASH disponibles.
+    BackHandler(onBack = onBack)
+    val context = LocalContext.current
     val trackSelector = remember {
-        DefaultTrackSelector(ctx).apply {
+        DefaultTrackSelector(context).apply {
             setParameters(
                 buildUponParameters()
-                    .setForceHighestSupportedBitrate(false)
-                    .setForceLowestBitrate(false)
+                    .setPreferredAudioLanguage("es")
+                    .setPreferredTextLanguage("es")
             )
         }
     }
-    var alternateLiveUrlTried by remember(url) { mutableStateOf(false) }
-    val currentUrl by rememberUpdatedState(url)
-
     val player = remember {
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("InterfreeTV/1.7 (Android)")
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(30_000)
-
-        ExoPlayer.Builder(ctx)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(ctx).setDataSourceFactory(httpFactory))
-            .setLoadControl(loadControl)
+        ExoPlayer.Builder(context)
             .setTrackSelector(trackSelector)
-            .setSeekBackIncrementMs(10_000L)
-            .setSeekForwardIncrementMs(10_000L)
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(15_000, 50_000, 1_500, 3_000)
+                    .build()
+            )
             .build()
-            .apply { playWhenReady = true }
     }
+    var playbackError by remember { mutableStateOf("") }
+    var showTracks by remember { mutableStateOf(false) }
 
     LaunchedEffect(url) {
-        alternateLiveUrlTried = false
-        player.setMediaItem(MediaItem.fromUri(url))
-        player.prepare()
-        player.playWhenReady = true
+        playbackError = ""
+        try {
+            val httpFactory = DefaultHttpDataSource.Factory()
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(15_000)
+                .setReadTimeoutMs(30_000)
+                .setUserAgent("VLC/3.0.20")
+            val mediaSourceFactory = DefaultMediaSourceFactory(context)
+                .setDataSourceFactory(httpFactory)
+            player.setMediaSource(mediaSourceFactory.createMediaSource(MediaItem.fromUri(url)))
+            player.prepare()
+            player.playWhenReady = true
+        } catch (e: Exception) {
+            playbackError = e.message ?: "No se pudo iniciar el video"
+        }
     }
 
     DisposableEffect(player) {
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                // Algunos servidores Xtream solo publican el canal en .ts y otros en .m3u8.
-                // Si falla la primera direccion en TV en vivo, probar una sola vez la extension alternativa.
-                val activeUrl = currentUrl
-                val isLiveUrl = activeUrl.contains("/live/", ignoreCase = true)
-                val alternateUrl = when {
-                    activeUrl.endsWith(".m3u8", ignoreCase = true) -> activeUrl.dropLast(5) + ".ts"
-                    activeUrl.endsWith(".ts", ignoreCase = true) -> activeUrl.dropLast(3) + ".m3u8"
-                    else -> null
-                }
-                if (isLiveUrl && !alternateLiveUrlTried && alternateUrl != null) {
-                    alternateLiveUrlTried = true
-                    playbackError = "Probando formato alternativo..."
-                    player.setMediaItem(MediaItem.fromUri(alternateUrl))
-                    player.prepare()
-                    player.playWhenReady = true
-                    return
-                }
-
-                val status = findHttpStatus(error)
-                playbackError = if (status != null) "HTTP $status" else error.errorCodeName
-            }
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                    playbackError = ""
-                    retryCount = 0
-                }
+                playbackError = "Error de reproducción: ${error.errorCodeName}"
             }
         }
         player.addListener(listener)
         onDispose {
             player.removeListener(listener)
-            // Detener y vaciar la sesión antes de liberar el reproductor para que
-            // películas, episodios y canales no continúen sonando al salir.
-            player.playWhenReady = false
-            player.pause()
-            player.stop()
-            player.clearMediaItems()
             player.release()
         }
     }
 
-    // El foco va al menú cuando está abierto y al reproductor cuando está oculto.
-    LaunchedEffect(menuOpen) {
-        try {
-            if (menuOpen) firstButtonFocus.requestFocus() else rootFocus.requestFocus()
-        } catch (_: Exception) {
-        }
-    }
-    // Los controles personalizados solo aparecen cuando el usuario toca el reproductor
-    // o solicita el menú con la flecha abajo del control remoto.
-    LaunchedEffect(menuOpen, showQualityMenu) {
-        if (menuOpen && !showQualityMenu) {
-            delay(5_000)
-            playerViewHolder[0]?.hideController()
-            menuOpen = false
-        }
-    }
-
-    // Atrás siempre sale del reproductor. Al desmontarse esta pantalla,
-    // DisposableEffect detiene, vacía y libera ExoPlayer.
-    BackHandler {
-        showQualityMenu = false
-        menuOpen = false
-        playerViewHolder[0]?.hideController()
-        onBack()
-    }
-
-    fun onKey(ev: KeyEvent): Boolean {
-        if (ev.type != KeyEventType.KeyDown) return false
-        if (menuOpen) {
-            if (ev.key == Key.DirectionUp) {
-                menuOpen = false
-                playerViewHolder[0]?.hideController()
-                return true
-            }
-            return false
-        }
-        return when (ev.key) {
-            Key.DirectionDown -> {
-                menuOpen = true
-                playerViewHolder[0]?.showController()
-                true
-            }
-            Key.DirectionLeft -> {
-                if (player.isCurrentMediaItemSeekable) {
-                    player.seekTo((player.currentPosition - 10_000L).coerceAtLeast(0L))
-                    playerViewHolder[0]?.showController()
-                }
-                true
-            }
-            Key.DirectionRight -> {
-                if (player.isCurrentMediaItemSeekable) {
-                    player.seekTo(player.currentPosition + 10_000L)
-                    playerViewHolder[0]?.showController()
-                }
-                true
-            }
-            Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.MediaPlayPause -> {
-                if (player.isPlaying) player.pause() else player.play()
-                playerViewHolder[0]?.showController()
-                true
-            }
-            else -> false
-        }
-    }
-
-    Box(
-        Modifier.fillMaxSize().background(Color.Black)
-            .onPreviewKeyEvent { onKey(it) }
-            .focusRequester(rootFocus)
-            .focusable()
-    ) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
-            factory = { c -> PlayerView(c).apply {
-                this.player = player
-                keepScreenOn = true
-                useController = true
-                controllerShowTimeoutMs = 5_000
-                isFocusable = false
-                descendantFocusability = android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                setControllerVisibilityListener(
-                    PlayerView.ControllerVisibilityListener { visibility: Int ->
-                        menuOpen = visibility == android.view.View.VISIBLE
-                    }
-                )
-                playerViewHolder[0] = this
-                // No mostrar el menú al abrir el reproductor; solo cuando el usuario
-                // toque la pantalla o solicite los controles con el mando.
-                post { hideController() }
-            } },
-            update = { view ->
-                view.player = player
-                view.controllerShowTimeoutMs = 5_000
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    this.player = player
+                    useController = true
+                    controllerAutoShow = true
+                    controllerShowTimeoutMs = 5000
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                }
             },
             modifier = Modifier.fillMaxSize()
         )
-        if (playbackError.isNotBlank()) {
+        Row(
+            Modifier.align(Alignment.TopStart).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = onBack) { Text("‹ Volver") }
+            Spacer(Modifier.width(8.dp))
+            Button(onClick = { showTracks = true }) { Text("Audio / Subtítulos") }
+        }
+        if (playbackError.isNotEmpty()) {
             Text(
-                "Problema de reproduccion: $playbackError",
-                color = Color(0xFFFFB4AB),
-                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
-                    .background(Color(0xCC241010)).padding(8.dp),
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-        if (menuOpen) {
-            Row(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    .background(Color(0xE6080D20))
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(onClick = onBack, modifier = Modifier.focusRequester(firstButtonFocus)) { Text("Volver") }
-                TextButton(onClick = { player.seekBack() }) { Text("−10 s") }
-                TextButton(onClick = { player.seekForward() }) { Text("+10 s") }
-                TextButton(onClick = { showQualityMenu = true }) { Text("Calidad: $qualityMode") }
-                TextButton(onClick = {
-                    TrackSelectionDialogBuilder(ctx, "Idioma de audio", player, C.TRACK_TYPE_AUDIO).build().show()
-                }) { Text("Audio") }
-                TextButton(onClick = {
-                    TrackSelectionDialogBuilder(ctx, "Subtitulos", player, C.TRACK_TYPE_TEXT).build().show()
-                }) { Text("Subtitulos") }
-                if (playbackError.isNotBlank()) {
-                    TextButton(onClick = {
-                        playbackError = ""
-                        retryCount = 0
-                        player.seekToDefaultPosition()
-                        player.prepare()
-                        player.play()
-                    }) { Text("Reintentar") }
-                }
-            }
-        }
-        if (showQualityMenu) {
-            AlertDialog(
-                onDismissRequest = { showQualityMenu = false },
-                title = { Text("Calidad de video") },
-                text = {
-                    Column {
-                        listOf("Automática", "Baja", "Media", "Alta").forEach { option ->
-                            TextButton(onClick = {
-                                qualityMode = option
-                                val maxBitrate = when (option) {
-                                    "Baja" -> 900_000
-                                    "Media" -> 1_800_000
-                                    "Alta" -> 4_000_000
-                                    else -> Int.MAX_VALUE
-                                }
-                                trackSelector.setParameters(
-                                    trackSelector.buildUponParameters()
-                                        .setForceHighestSupportedBitrate(false)
-                                        .setMaxVideoBitrate(maxBitrate)
-                                )
-                                showQualityMenu = false
-                            }, modifier = Modifier.fillMaxWidth()) {
-                                Text(if (qualityMode == option) "✓ $option" else option)
-                            }
-                        }
-                    }
-                },
-                confirmButton = { TextButton(onClick = { showQualityMenu = false }) { Text("Cerrar") } }
+                playbackError,
+                color = Color.White,
+                modifier = Modifier.align(Alignment.Center)
+                    .background(Color(0xCC990000), RoundedCornerShape(8.dp))
+                    .padding(12.dp)
             )
         }
     }
+
+    if (showTracks) {
+        AlertDialog(
+            onDismissRequest = { showTracks = false },
+            title = { Text("Audio y subtítulos") },
+            text = {
+                Column {
+                    TextButton(onClick = {
+                        showTracks = false
+                        TrackSelectionDialogBuilder(context, "Audio", player, C.TRACK_TYPE_AUDIO).build().show()
+                    }) { Text("Seleccionar audio") }
+                    TextButton(onClick = {
+                        showTracks = false
+                        TrackSelectionDialogBuilder(context, "Subtítulos", player, C.TRACK_TYPE_TEXT).build().show()
+                    }) { Text("Seleccionar subtítulos") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTracks = false }) { Text("Cerrar") }
+            }
+        )
+    }
 }
+
+// ---------------------------------------------------------------- Login
 
 @Composable
 fun LoginScreen(
@@ -1095,49 +889,53 @@ fun LoginScreen(
     prefs: android.content.SharedPreferences,
     onGo: (String, String, String) -> Unit
 ) {
-    var server by remember { mutableStateOf(prefs.getString("server", "")!!) }
-    var user by remember { mutableStateOf(prefs.getString("user", "")!!) }
-    var pass by remember { mutableStateOf(prefs.getString("pass", "")!!) }
-    Column(
-        Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+    var server by remember { mutableStateOf(prefs.getString("server", "") ?: "") }
+    var user by remember { mutableStateOf(prefs.getString("user", "") ?: "") }
+    var pass by remember { mutableStateOf(prefs.getString("pass", "") ?: "") }
+    Box(
+        Modifier.fillMaxSize().background(Bg),
+        contentAlignment = Alignment.Center
     ) {
-        Image(
-            painterResource(R.drawable.logo_full),
-            contentDescription = "INTERFREE TV",
-            modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
-            contentScale = ContentScale.Fit
-        )
-        Text("Inicia sesión con tu usuario")
-        Spacer(Modifier.height(16.dp))
-        Column(Modifier.widthIn(max = 420.dp)) {
-            OutlinedTextField(
-                server, { server = it }, label = { Text("URL del servidor (http://host:puerto)") },
-                placeholder = { Text("http://ejemplo.com:8080") },
-                singleLine = true, modifier = Modifier.fillMaxWidth()
+        Column(
+            Modifier.fillMaxWidth().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Image(
+                painterResource(R.drawable.logo_full),
+                contentDescription = "INTERFREE TV",
+                modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
+                contentScale = ContentScale.Fit
             )
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                user, { user = it }, label = { Text("Usuario") },
-                singleLine = true, modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                pass, { pass = it }, label = { Text("Contraseña") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(12.dp))
-            if (error.isNotEmpty()) {
-                Text(error, color = MaterialTheme.colorScheme.error)
+            Text("Inicia sesión con tu usuario")
+            Spacer(Modifier.height(16.dp))
+            Column(Modifier.widthIn(max = 420.dp)) {
+                OutlinedTextField(
+                    server, { server = it }, label = { Text("URL del servidor (http://host:puerto)") },
+                    placeholder = { Text("http://ejemplo.com:8080") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
                 Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    user, { user = it }, label = { Text("Usuario") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    pass, { pass = it }, label = { Text("Contraseña") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+                if (error.isNotEmpty()) {
+                    Text(error, color = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.height(8.dp))
+                }
+                Button(
+                    onClick = {
+                        onGo(server.trim(), user.trim(), pass.trim())
+                    },
+                    enabled = !busy, modifier = Modifier.fillMaxWidth()
+                ) { Text(if (busy) "Entrando…" else "Entrar") }
             }
-            Button(
-                onClick = {
-                    onGo(server.trim(), user.trim(), pass.trim())
-                },
-                enabled = !busy, modifier = Modifier.fillMaxWidth()
-            ) { Text(if (busy) "Entrando…" else "Entrar") }
         }
     }
 }
@@ -1181,5 +979,20 @@ fun SplashScreen() {
             modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
             contentScale = ContentScale.Fit
         )
+    }
+}
+        }
+
+        // El reproductor solo existe mientras se ve en pantalla completa.
+        // Al volver atrás se libera y el audio se detiene.
+        if (!splash && cur != null && playerVisible) {
+            PlayerScreen(
+                url = cur.second,
+                onBack = {
+                    playerVisible = false
+                    playing = null
+                }
+            )
+        }
     }
 }
