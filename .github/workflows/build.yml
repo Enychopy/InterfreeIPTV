@@ -17,31 +17,14 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
-      - name: Descomprimir proyecto
+      - name: Descomprimir proyecto optimizado
         run: |
-          unzip -oq InterfreeTV_diseno_nuevo.zip
-          test -d InterfreeTV/app
-
-      - name: Instalar archivos corregidos
-        run: |
-          APP="InterfreeTV/app/src/main/java/com/interfree/tv"
-
-          # Instalar MainActivity corregido
-          test -f MainActivity_corregido.kt
-          cp MainActivity_corregido.kt "$APP/MainActivity.kt"
-
-          # Instalar Data.kt corregido
-          if [ -f Data_corregido_orden_canales.kt ]; then
-            cp Data_corregido_orden_canales.kt "$APP/Data.kt"
-          elif [ -f Data.kt ]; then
-            cp Data.kt "$APP/Data.kt"
-          else
-            echo "ERROR: No se encontró el Data.kt corregido"
-            exit 1
-          fi
-
-          echo "Archivos corregidos instalados:"
-          ls -l "$APP/MainActivity.kt" "$APP/Data.kt"
+          rm -rf InterfreeTV
+          unzip -oq InterfreeTV_optimizado_subtitulos.zip
+          test -f InterfreeTV/settings.gradle.kts
+          test -f InterfreeTV/app/build.gradle.kts
+          test -f InterfreeTV/app/src/main/java/com/interfree/tv/MainActivity.kt
+          test -f InterfreeTV/app/src/main/java/com/interfree/tv/Data.kt
 
       - name: Configurar Java
         uses: actions/setup-java@v4
@@ -72,10 +55,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v1.3-${{ github.run_number }}"
+          TAG="v1.4-${{ github.run_number }}"
           gh release create "$TAG" InterfreeTV.apk \
             --title "INTERFREE TV ($TAG)" \
-            --notes "Nueva compilación de INTERFREE TV"
+            --notes "Nueva compilación optimizada de INTERFREE TV"
 
       - name: Guardar APK como Artifact
         uses: actions/upload-artifact@v4
