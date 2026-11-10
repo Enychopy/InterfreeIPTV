@@ -26,6 +26,31 @@ jobs:
           test -f InterfreeTV/app/src/main/java/com/interfree/tv/MainActivity.kt
           test -f InterfreeTV/app/src/main/java/com/interfree/tv/Data.kt
 
+      - name: Corregir listener del reproductor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("InterfreeTV/app/src/main/java/com/interfree/tv/MainActivity.kt")
+          s = p.read_text()
+
+          old = """                setControllerVisibilityListener { visibility ->
+                    menuOpen = visibility == android.view.View.VISIBLE
+                }"""
+
+          new = """                setControllerVisibilityListener(
+                    PlayerView.ControllerVisibilityListener { visibility ->
+                        menuOpen = visibility == android.view.View.VISIBLE
+                    }
+                )"""
+
+          if s.count(old) != 1:
+              raise SystemExit("ERROR: No se encontró exactamente el bloque esperado.")
+
+          p.write_text(s.replace(old, new))
+          print("Listener corregido correctamente.")
+          PY
+
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
