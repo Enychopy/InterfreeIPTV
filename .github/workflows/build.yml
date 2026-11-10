@@ -30,24 +30,30 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           p = Path("InterfreeTV/app/src/main/java/com/interfree/tv/MainActivity.kt")
           s = p.read_text()
 
-          old = """                setControllerVisibilityListener { visibility ->
-                    menuOpen = visibility == android.view.View.VISIBLE
-                }"""
+          pattern = re.compile(
+              r"setControllerVisibilityListener\s*\{\s*visibility\s*->\s*menuOpen\s*=\s*visibility\s*==\s*android\.view\.View\.VISIBLE\s*\}",
+              re.MULTILINE
+          )
 
-          new = """                setControllerVisibilityListener(
-                    PlayerView.ControllerVisibilityListener { visibility ->
-                        menuOpen = visibility == android.view.View.VISIBLE
-                    }
-                )"""
+          replacement = """setControllerVisibilityListener(
+              PlayerView.ControllerVisibilityListener { visibility ->
+                  menuOpen = visibility == android.view.View.VISIBLE
+              }
+          )"""
 
-          if s.count(old) != 1:
-              raise SystemExit("ERROR: No se encontró exactamente el bloque esperado.")
+          s, count = pattern.subn(replacement, s)
 
-          p.write_text(s.replace(old, new))
+          if count != 1:
+              raise SystemExit(
+                  f"ERROR: Se esperaba corregir 1 listener, pero se encontraron {count}."
+              )
+
+          p.write_text(s)
           print("Listener corregido correctamente.")
           PY
 
