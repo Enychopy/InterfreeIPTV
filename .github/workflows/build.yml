@@ -1,3 +1,4 @@
+
 name: Construir APK
 
 on:
@@ -20,6 +21,13 @@ jobs:
           rm -rf InterfreeTV
           unzip -oq InterfreeTV_diseno_nuevo.zip
           grep -n "versionName" InterfreeTV/app/build.gradle.kts
+
+      - name: Instalar MainActivity corregido
+        run: |
+          f=InterfreeTV/app/src/main/java/com/interfree/tv/MainActivity.kt
+          test -f MainActivity_corregido.kt
+          cp MainActivity_corregido.kt "$f"
+          echo "MainActivity corregido instalado"
 
       - name: Corregir reproductor
         run: |
