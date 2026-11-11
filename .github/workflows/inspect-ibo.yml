@@ -1,0 +1,60 @@
+
+name: Inspeccionar APK original para INTERFREE TV PRO
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Descargar APK original
+        run: |
+          curl -L --fail -o Red4TVibo.apk \
+          "https://github.com/Enychopy/InterfreeIPTV/releases/download/ibo-original/Red4TVibo.apk"
+
+      - name: Instalar Apktool
+        run: |
+          curl -L --fail -o apktool.jar \
+          "https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar"
+
+      - name: Descompilar APK
+        run: |
+          java -jar apktool.jar d -f Red4TVibo.apk -o decoded
+
+      - name: Crear informe de inspección
+        run: |
+          {
+            echo "=== INTERFREE TV PRO - INSPECCION ==="
+            echo ""
+            echo "=== PAQUETE Y COMPONENTES ==="
+            grep -E 'package=|android:label=|android:name=' decoded/AndroidManifest.xml | head -100
+            echo ""
+            echo "=== RECURSOS DE IMAGEN ==="
+            find decoded/res -type f \( -iname "*.png" -o -iname "*.webp" -o -iname "*.jpg" -o -iname "*.jpeg" \) | sort
+            echo ""
+            echo "=== REFERENCIAS A IBO Y RED4TV ==="
+            grep -RilE 'ibo|red4tv' decoded/res decoded/assets 2>/dev/null | head -200
+            echo ""
+            echo "=== TAMAÑO DEL APK ==="
+            ls -lh Red4TVibo.apk
+          } > inspection.txt
+
+      - name: Guardar archivos de inspección
+        uses: actions/upload-artifact@v4
+        with:
+          name: INTERFREE-TV-PRO-inspeccion
+          path: |
+            inspection.txt
+            decoded/AndroidManifest.xml
+            decoded/res/
+            decoded/assets/
+          if-no-files-found: warn
+          retention-days: 7
