@@ -35,32 +35,66 @@ jobs:
       - name: Cambiar paquete, nombre y permiso conflictivo
         run: |
           python3 - <<'PY'
+          import re
           from pathlib import Path
 
-          replacements = [
-              ("com.apps.red4tv", "com.interfree.tvpro"),
-              ("com.apps.amigostv.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSIONbpwsck", "com.interfree.tvpro.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"),
-              ("Red4TV", "INTERFREE TV PRO"),
-          ]
-
           root = Path("decoded")
-          for file in root.rglob("*"):
-              if file.is_file():
-                  try:
-                      content = file.read_text(encoding="utf-8")
-                      updated = content
-                      for old, new in replacements:
-                          updated = updated.replace(old, new)
-                      if updated != content:
-                          file.write_text(updated, encoding="utf-8")
-                  except (UnicodeDecodeError, OSError):
-                      pass
+
+          # 1. Reemplazos seguros en codigo smali (sin espacios)
+          for smali in root.glob("smali*"):
+              for file in smali.rglob("*.smali"):
+                  content = file.read_text(encoding="utf-8", errors="ignore")
+                  updated = content.replace("com.apps.red4tv", "com.interfree.tvpro")
+                  updated = updated.replace(
+                      "com.apps.amigostv.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSIONbpwsck",
+                      "com.interfree.tvpro.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+                  )
+                  if updated != content:
+                      file.write_text(updated, encoding="utf-8")
+
+          # 2. Reemplazos de paquete, permiso y marca en XML y recursos
+          xml_targets = [root / "AndroidManifest.xml"] + list((root / "res").rglob("*.xml"))
+          for file in xml_targets:
+              if not file.is_file():
+                  continue
+              content = file.read_text(encoding="utf-8", errors="ignore")
+              updated = content.replace("com.apps.red4tv", "com.interfree.tvpro")
+              updated = updated.replace(
+                  "com.apps.amigostv.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSIONbpwsck",
+                  "com.interfree.tvpro.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+              )
+              updated = re.sub(r"red4tv", "INTERFREE TV PRO", updated, flags=re.IGNORECASE)
+              if updated != content:
+                  file.write_text(updated, encoding="utf-8")
+
+          # 3. Forzar etiqueta principal en AndroidManifest.xml y strings.xml
+          manifest = root / "AndroidManifest.xml"
+          m_text = manifest.read_text(encoding="utf-8")
+          m_text = re.sub(
+              r'(<application\b[^>]*?\bandroid:label=")[^"]*(")',
+              r'\1INTERFREE TV PRO\2',
+              m_text,
+              count=1,
+              flags=re.DOTALL,
+          )
+          manifest.write_text(m_text, encoding="utf-8")
+
+          for s_file in (root / "res").rglob("strings.xml"):
+              s_text = s_file.read_text(encoding="utf-8")
+              s_new = re.sub(
+                  r'(<string name="app_name">)[^<]*(</string>)',
+                  r'\1INTERFREE TV PRO\2',
+                  s_text,
+              )
+              if s_new != s_text:
+                  s_file.write_text(s_new, encoding="utf-8")
           PY
 
-      - name: Instalar logo INTERFREE TV PRO
+      - name: Instalar logo INTERFREE TV PRO y listar graficos
         run: |
           python3 -m pip install --break-system-packages Pillow
           python3 - <<'PY'
+          import re
           from PIL import Image
           from pathlib import Path
 
@@ -72,27 +106,39 @@ jobs:
           print(f"Usando logo: {logo_path}")
           logo = Image.open(logo_path).convert("RGBA")
 
-          root = Path("decoded/res")
-          count = 0
+          root = Path("decoded")
+          manifest_text = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
 
-          for file in root.rglob("*"):
-              if not file.is_file():
-                  continue
-              if file.suffix.lower() not in (".png", ".webp"):
-                  continue
-              name = file.stem.lower()
-              if "ic_launcher" not in name and "launcher_icon" not in name:
+          target_stems = {"ic_launcher", "launcher_icon", "app_icon"}
+          for match in re.finditer(r'android:(?:icon|roundIcon|banner)="@(?:mipmap|drawable)/([^"]+)"', manifest_text):
+              target_stems.add(match.group(1))
+
+          for xml_file in (root / "res").rglob("*.xml"):
+              if xml_file.stem in target_stems:
+                  x_text = xml_file.read_text(encoding="utf-8", errors="ignore")
+                  for fg in re.finditer(r'android:foreground="@(?:mipmap|drawable)/([^"]+)"', x_text):
+                      target_stems.add(fg.group(1))
+
+          print(f"Recursos de icono detectados: {sorted(target_stems)}")
+
+          count = 0
+          print("=== IMAGENES GRANDES EN RES (> 4 KB) ===")
+          for file in sorted((root / "res").rglob("*")):
+              if not file.is_file() or file.suffix.lower() not in (".png", ".webp"):
                   continue
               try:
                   with Image.open(file) as original:
                       size = original.size
-                  resized = logo.resize(size, Image.Resampling.LANCZOS)
-                  resized.save(file)
-                  count += 1
+                  if file.stat().st_size > 4096:
+                      print(f"  {file.relative_to(root)} ({size[0]}x{size[1]}, {file.stat().st_size} B)")
+                  if file.stem in target_stems:
+                      resized = logo.resize(size, Image.Resampling.LANCZOS)
+                      resized.save(file)
+                      count += 1
               except Exception:
                   pass
 
-          print(f"Iconos actualizados: {count}")
+          print(f"Iconos reemplazados: {count}")
           PY
 
       - name: Recompilar APK
