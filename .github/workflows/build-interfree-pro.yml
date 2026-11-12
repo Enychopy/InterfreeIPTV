@@ -1,93 +1,70 @@
-
-name: Build INTERFREE TV PRO
+name: Construir INTERFREE TV PRO
 
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
-  build-pro:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Preparar Java
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
+          distribution: 'temurin'
           java-version: '17'
 
-      - name: Descargar APK original
+      - name: Instalar Apktool 2.11.1
         run: |
-          curl -L --fail -o Red4TVibo.apk \
-          "https://github.com/Enychopy/InterfreeIPTV/releases/download/ibo-original/Red4TVibo.apk"
+          wget https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.11.1.jar -O apktool.jar
+          echo 'java -jar /usr/local/bin/apktool.jar "$@"' > apktool
+          chmod +x apktool
+          sudo mv apktool /usr/local/bin/
+          sudo mv apktool.jar /usr/local/bin/
 
-      - name: Descargar Apktool
-        run: |
-          curl -L --fail -o apktool.jar \
-          "https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar"
+      - name: Descargar Uber APK Signer 1.3.0
+        run: wget https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar -O uber-apk-signer.jar
+
+      - name: Descargar APK original (ibo-original)
+        uses: dsaltares/fetch-gh-release-asset@master
+        with:
+          repo: Enychopy/InterfreeIPTV
+          version: tags/ibo-original
+          file: Red4TVibo.apk
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Descompilar APK
+        run: apktool d Red4TVibo.apk -o INTERFREE-PRO
+
+      - name: Modificar paquete, nombre y permisos conflictivos
         run: |
-          java -jar apktool.jar d -f Red4TVibo.apk -o decoded
+          # 1. Renombrar paquete principal en AndroidManifest.xml
+          sed -i 's/package="com.apps.red4tv"/package="com.interfree.tvpro"/g' INTERFREE-PRO/AndroidManifest.xml
+          
+          # 2. Renombrar los 3 authorities para evitar conflictos de provider
+          sed -i 's/com.apps.red4tv.provider/com.interfree.tvpro.provider/g' INTERFREE-PRO/AndroidManifest.xml
+          sed -i 's/com.apps.red4tv.firebaseinitprovider/com.interfree.tvpro.firebaseinitprovider/g' INTERFREE-PRO/AndroidManifest.xml
+          sed -i 's/com.apps.red4tv.androidx-startup/com.interfree.tvpro.androidx-startup/g' INTERFREE-PRO/AndroidManifest.xml
+          
+          # 3. SOLUCIÓN: Renombrar el permiso personalizado conflictivo en el Manifiesto
+          sed -i 's/com\.apps\.amigostv\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSIONbpwsck/com.interfree.tvpro.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION/g' INTERFREE-PRO/AndroidManifest.xml
+          
+          # 4. Renombrar el permiso en todos los archivos smali (código en tiempo de ejecución)
+          find INTERFREE-PRO/smali* -type f -name "*.smali" -exec sed -i 's/com\.apps\.amigostv\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSIONbpwsck/com.interfree.tvpro.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION/g' {} +
+          
+          # 5. Cambiar el nombre visible de la app a "INTERFREE TV PRO"
+          find INTERFREE-PRO/res -type f -name "strings.xml" -exec sed -i 's/name="app_name">[^<]*/name="app_name">INTERFREE TV PRO/g' {} +
 
-      - name: Crear paquete independiente
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
+      - name: Recompilar APK
+        run: apktool b INTERFREE-PRO -o INTERFREE-TV-PRO-UNALIGNED.apk
 
-          root = Path("decoded")
-          old = "com.apps.red4tv"
-          new = "com.interfree.tvpro"
+      - name: Firmar APK con Uber APK Signer (V3)
+        run: java -jar uber-apk-signer.jar -a INTERFREE-TV-PRO-UNALIGNED.apk --allowResign -o ./build_final
 
-          manifest = root / "AndroidManifest.xml"
-          content = manifest.read_text(encoding="utf-8")
-          content = content.replace(old, new)
-          content = content.replace('android:label="Red4TV"',
-                                    'android:label="INTERFREE TV PRO"')
-          manifest.write_text(content, encoding="utf-8")
-
-          for folder in ("smali", "smali_classes2", "smali_classes3",
-                         "res", "assets"):
-              base = root / folder
-              if not base.exists():
-                  continue
-              for file in base.rglob("*"):
-                  if not file.is_file():
-                      continue
-                  try:
-                      data = file.read_text(encoding="utf-8")
-                  except (UnicodeDecodeError, OSError):
-                      continue
-                  if old in data:
-                      file.write_text(data.replace(old, new),
-                                      encoding="utf-8")
-
-          print("Paquete configurado:", new)
-          PY
-
-      - name: Compilar APK
-        run: |
-          java -jar apktool.jar b decoded \
-            -o INTERFREE-TV-PRO-unsigned.apk
-
-      - name: Descargar firmador
-        run: |
-          curl -L --fail -o uber-apk-signer.jar \
-          "https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar"
-
-      - name: Firmar APK
-        run: |
-          java -jar uber-apk-signer.jar \
-            --apks INTERFREE-TV-PRO-unsigned.apk \
-            --out signed \
-            --allowResign
-
-      - name: Guardar APK de prueba
+      - name: Subir APK final (Artefacto)
         uses: actions/upload-artifact@v4
         with:
-          name: INTERFREE-TV-PRO-PRUEBA
-          path: signed/
-          if-no-files-found: error
-          retention-days: 7
+          name: INTERFREE-TV-PRO-FINAL
+          path: ./build_final/*.apk
