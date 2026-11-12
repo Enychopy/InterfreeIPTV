@@ -12,13 +12,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Inspeccionar workflows y commit a5ef55a
+      - name: Leer verify-interfree-pro y commit a710a48
         run: |
-          echo "=== WORKFLOWS ACTUALES ==="
-          ls -la .github/workflows/
+          echo "=== VERIFY-INTERFREE-PRO.YML ==="
+          cat .github/workflows/verify-interfree-pro.yml
           echo ""
-          echo "=== CONTENIDO DE build-interfree-pro.yml EN a5ef55a ==="
-          git show a5ef55a:.github/workflows/build-interfree-pro.yml
-          echo ""
-          echo "=== CONTENIDO DE verify-interfree-pro.yml ==="
-          cat .github/workflows/verify-interfree-pro.yml || true
+          echo "=== BUILD ORIGINAL EN a710a48 ==="
+          git show a710a48:.github/workflows/build-interfree-pro.yml
