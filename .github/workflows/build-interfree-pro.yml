@@ -40,7 +40,7 @@ jobs:
 
           root = Path("decoded")
 
-          # 1. Reemplazos seguros en codigo smali (sin espacios)
+          # 1. Reemplazos seguros en codigo smali
           for smali in root.glob("smali*"):
               for file in smali.rglob("*.smali"):
                   content = file.read_text(encoding="utf-8", errors="ignore")
@@ -64,6 +64,7 @@ jobs:
                   "com.interfree.tvpro.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
               )
               updated = re.sub(r"red4tv", "INTERFREE TV PRO", updated, flags=re.IGNORECASE)
+              updated = re.sub(r"cali\s*tv", "INTERFREE TV PRO", updated, flags=re.IGNORECASE)
               if updated != content:
                   file.write_text(updated, encoding="utf-8")
 
@@ -90,7 +91,7 @@ jobs:
                   s_file.write_text(s_new, encoding="utf-8")
           PY
 
-      - name: Instalar logo INTERFREE TV PRO y listar graficos
+      - name: Instalar logo INTERFREE TV PRO (externo e interno)
         run: |
           python3 -m pip install --break-system-packages Pillow
           python3 - <<'PY'
@@ -102,14 +103,21 @@ jobs:
           if not png_files:
               raise FileNotFoundError("No se encontro ningun archivo .png en el repositorio")
 
-          logo_path = png_files[0]
-          print(f"Usando logo: {logo_path}")
-          logo = Image.open(logo_path).convert("RGBA")
-
+          logo = Image.open(png_files[0]).convert("RGBA")
           root = Path("decoded")
           manifest_text = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
 
-          target_stems = {"ic_launcher", "launcher_icon", "app_icon"}
+          target_stems = {
+              "ic_launcher",
+              "ic_launcher_round",
+              "launcher_icon",
+              "app_icon",
+              "banner",
+              "trans_logo",
+              "trans_logo_alt",
+              "promos",
+          }
+
           for match in re.finditer(r'android:(?:icon|roundIcon|banner)="@(?:mipmap|drawable)/([^"]+)"', manifest_text):
               target_stems.add(match.group(1))
 
@@ -119,26 +127,39 @@ jobs:
                   for fg in re.finditer(r'android:foreground="@(?:mipmap|drawable)/([^"]+)"', x_text):
                       target_stems.add(fg.group(1))
 
-          print(f"Recursos de icono detectados: {sorted(target_stems)}")
+          def fit_on_canvas(logo_rgba: Image.Image, target_size: tuple[int, int]) -> Image.Image:
+              tw, th = target_size
+              if tw == th:
+                  return logo_rgba.resize((tw, th), Image.Resampling.LANCZOS)
+              # Centrar proporcionalmente en lienzos panorámicos (1920x1080) sin deformar
+              max_w = max(1, int(tw * 0.85))
+              max_h = max(1, int(th * 0.85))
+              lw, lh = logo_rgba.size
+              scale = min(max_w / lw, max_h / lh)
+              new_w = max(1, int(lw * scale))
+              new_h = max(1, int(lh * scale))
+              resized = logo_rgba.resize((new_w, new_h), Image.Resampling.LANCZOS)
+              canvas = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+              canvas.paste(resized, ((tw - new_w) // 2, (th - new_h) // 2), resized)
+              return canvas
 
           count = 0
-          print("=== IMAGENES GRANDES EN RES (> 4 KB) ===")
           for file in sorted((root / "res").rglob("*")):
               if not file.is_file() or file.suffix.lower() not in (".png", ".webp"):
+                  continue
+              if file.stem not in target_stems:
                   continue
               try:
                   with Image.open(file) as original:
                       size = original.size
-                  if file.stat().st_size > 4096:
-                      print(f"  {file.relative_to(root)} ({size[0]}x{size[1]}, {file.stat().st_size} B)")
-                  if file.stem in target_stems:
-                      resized = logo.resize(size, Image.Resampling.LANCZOS)
-                      resized.save(file)
-                      count += 1
-              except Exception:
-                  pass
+                  out_img = fit_on_canvas(logo, size)
+                  out_img.save(file)
+                  print(f"Reemplazado: {file.relative_to(root)} ({size[0]}x{size[1]})")
+                  count += 1
+              except Exception as e:
+                  print(f"Error en {file}: {e}")
 
-          print(f"Iconos reemplazados: {count}")
+          print(f"Total de graficos reemplazados: {count}")
           PY
 
       - name: Recompilar APK
