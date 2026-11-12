@@ -1,0 +1,93 @@
+
+name: Build INTERFREE TV PRO
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-pro:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Descargar APK original
+        run: |
+          curl -L --fail -o Red4TVibo.apk \
+          "https://github.com/Enychopy/InterfreeIPTV/releases/download/ibo-original/Red4TVibo.apk"
+
+      - name: Descargar Apktool
+        run: |
+          curl -L --fail -o apktool.jar \
+          "https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar"
+
+      - name: Descompilar APK
+        run: |
+          java -jar apktool.jar d -f Red4TVibo.apk -o decoded
+
+      - name: Crear paquete independiente
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("decoded")
+          old = "com.apps.red4tv"
+          new = "com.interfree.tvpro"
+
+          manifest = root / "AndroidManifest.xml"
+          content = manifest.read_text(encoding="utf-8")
+          content = content.replace(old, new)
+          content = content.replace('android:label="Red4TV"',
+                                    'android:label="INTERFREE TV PRO"')
+          manifest.write_text(content, encoding="utf-8")
+
+          for folder in ("smali", "smali_classes2", "smali_classes3",
+                         "res", "assets"):
+              base = root / folder
+              if not base.exists():
+                  continue
+              for file in base.rglob("*"):
+                  if not file.is_file():
+                      continue
+                  try:
+                      data = file.read_text(encoding="utf-8")
+                  except (UnicodeDecodeError, OSError):
+                      continue
+                  if old in data:
+                      file.write_text(data.replace(old, new),
+                                      encoding="utf-8")
+
+          print("Paquete configurado:", new)
+          PY
+
+      - name: Compilar APK
+        run: |
+          java -jar apktool.jar b decoded \
+            -o INTERFREE-TV-PRO-unsigned.apk
+
+      - name: Descargar firmador
+        run: |
+          curl -L --fail -o uber-apk-signer.jar \
+          "https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar"
+
+      - name: Firmar APK
+        run: |
+          java -jar uber-apk-signer.jar \
+            --apks INTERFREE-TV-PRO-unsigned.apk \
+            --out signed \
+            --allowResign
+
+      - name: Guardar APK de prueba
+        uses: actions/upload-artifact@v4
+        with:
+          name: INTERFREE-TV-PRO-PRUEBA
+          path: signed/
+          if-no-files-found: error
+          retention-days: 7
