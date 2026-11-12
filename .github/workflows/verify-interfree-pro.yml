@@ -39,7 +39,6 @@ jobs:
 
           old = "com.apps.red4tv"
           new = "com.interfree.tvpro"
-
           root = Path("decoded")
 
           for file in root.rglob("*"):
@@ -58,6 +57,48 @@ jobs:
           content = content.replace(old, new)
           content = content.replace("Red4TV", "INTERFREE TV PRO")
           manifest.write_text(content, encoding="utf-8")
+          PY
+
+      - name: Descargar e instalar logo INTERFREE
+        run: |
+          curl -L --fail -o interfree-logo.png \
+            https://raw.githubusercontent.com/Enychopy/InterfreeIPTV/main/file_000000000d3882129015abab734c95d8.png
+
+          python3 -m pip install --break-system-packages Pillow
+
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+
+          logo = Image.open("interfree-logo.png").convert("RGBA")
+          root = Path("decoded/res")
+          count = 0
+
+          for file in root.rglob("*"):
+              if not file.is_file():
+                  continue
+
+              if file.suffix.lower() not in (".png", ".webp"):
+                  continue
+
+              name = file.stem.lower()
+              if "ic_launcher" not in name and "launcher_icon" not in name:
+                  continue
+
+              try:
+                  original = Image.open(file)
+                  size = original.size
+                  resized = logo.resize(size, Image.Resampling.LANCZOS)
+                  resized.save(file, format="PNG")
+                  count += 1
+                  print(f"Actualizado: {file} ({size[0]}x{size[1]})")
+              except Exception as error:
+                  print(f"No se pudo actualizar {file}: {error}")
+
+          if count == 0:
+              raise SystemExit("No se encontraron iconos del lanzador.")
+          
+          print(f"Total de recursos actualizados: {count}")
           PY
 
       - name: Compilar APK
@@ -87,12 +128,11 @@ jobs:
           java -jar apktool.jar d -f "$APK" -o verified
 
           grep -q 'package="com.interfree.tvpro"' verified/AndroidManifest.xml
-
           echo "VERIFICACION COMPLETADA"
 
       - name: Guardar APK verificada
         uses: actions/upload-artifact@v4
         with:
-          name: INTERFREE-TV-PRO-VERIFICADA
+          name: INTERFREE-TV-PRO-LOGO-NUEVO
           path: signed/*.apk
           if-no-files-found: error
