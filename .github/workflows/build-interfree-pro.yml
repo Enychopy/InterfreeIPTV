@@ -64,7 +64,14 @@ jobs:
           from PIL import Image
           from pathlib import Path
 
-          logo = Image.open("file_00000000d3882129015abab734c95d8.png").convert("RGBA")
+          png_files = sorted(Path(".").glob("*.png"))
+          if not png_files:
+              raise FileNotFoundError("No se encontro ningun archivo .png en el repositorio")
+
+          logo_path = png_files[0]
+          print(f"Usando logo: {logo_path}")
+          logo = Image.open(logo_path).convert("RGBA")
+
           root = Path("decoded/res")
           count = 0
 
