@@ -91,9 +91,10 @@ jobs:
                   s_file.write_text(s_new, encoding="utf-8")
           PY
 
-      - name: Instalar logo INTERFREE TV PRO (externo e interno)
+      - name: Instalar logos (externo, interno y tarjeta derecha) y generar intro.mp4
         run: |
           python3 -m pip install --break-system-packages Pillow
+          command -v ffmpeg >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y ffmpeg)
           python3 - <<'PY'
           import re
           from PIL import Image
@@ -116,6 +117,7 @@ jobs:
               "trans_logo",
               "trans_logo_alt",
               "promos",
+              "image_qrcode",
           }
 
           for match in re.finditer(r'android:(?:icon|roundIcon|banner)="@(?:mipmap|drawable)/([^"]+)"', manifest_text):
@@ -129,9 +131,8 @@ jobs:
 
           def fit_on_canvas(logo_rgba: Image.Image, target_size: tuple[int, int]) -> Image.Image:
               tw, th = target_size
-              if tw == th:
+              if abs(tw - th) <= 4:
                   return logo_rgba.resize((tw, th), Image.Resampling.LANCZOS)
-              # Centrar proporcionalmente en lienzos panorámicos (1920x1080) sin deformar
               max_w = max(1, int(tw * 0.85))
               max_h = max(1, int(th * 0.85))
               lw, lh = logo_rgba.size
@@ -149,18 +150,34 @@ jobs:
                   continue
               if file.stem not in target_stems:
                   continue
-              try:
-                  with Image.open(file) as original:
-                      size = original.size
-                  out_img = fit_on_canvas(logo, size)
-                  out_img.save(file)
-                  print(f"Reemplazado: {file.relative_to(root)} ({size[0]}x{size[1]})")
-                  count += 1
-              except Exception as e:
-                  print(f"Error en {file}: {e}")
+              with Image.open(file) as original:
+                  size = original.size
+              out_img = fit_on_canvas(logo, size)
+              out_img.save(file)
+              print(f"Reemplazado: {file.relative_to(root)} ({size[0]}x{size[1]})")
+              count += 1
 
           print(f"Total de graficos reemplazados: {count}")
+
+          # Crear fotograma HD 1280x720 para el video intro.mp4
+          intro_bg = Image.new("RGBA", (1280, 720), (10, 10, 16, 255))
+          lw, lh = logo.size
+          scale = min(420 / lw, 420 / lh)
+          nw, nh = int(lw * scale), int(lh * scale)
+          logo_intro = logo.resize((nw, nh), Image.Resampling.LANCZOS)
+          intro_bg.paste(logo_intro, ((1280 - nw) // 2, (720 - nh) // 2), logo_intro)
+          intro_bg.convert("RGB").save("intro_frame.png")
+
+          # Asegurar que mp4 no se comprima en apktool.yml para que VideoView lo reproduzca
+          yml_path = root / "apktool.yml"
+          if yml_path.exists():
+              yml = yml_path.read_text(encoding="utf-8")
+              if "doNotCompress:" in yml and "- mp4" not in yml:
+                  yml = yml.replace("doNotCompress:\n", "doNotCompress:\n- mp4\n", 1)
+                  yml_path.write_text(yml, encoding="utf-8")
           PY
+          ffmpeg -y -loop 1 -i intro_frame.png -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
+            -c:v libx264 -t 3 -pix_fmt yuv420p -vf "scale=1280:720" -c:a aac -shortest decoded/assets/intro.mp4
 
       - name: Recompilar APK
         run: java -jar apktool.jar b decoded -o INTERFREE-TV-PRO-UNALIGNED.apk
