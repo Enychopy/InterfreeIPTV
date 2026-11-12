@@ -1,33 +1,63 @@
-name: diagnose-interfree-pro
-on: workflow_dispatch
-permissions:
-  contents: read
-  actions: read
+name: Diagnosticar INTERFREE TV PRO
+
+on:
+  workflow_dispatch:
+
 jobs:
   diag:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Descargar APKs
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar herramientas (aapt2)
         run: |
-          mkdir w && cd w
-          gh release download ibo-original -p Red4TVibo.apk -R ${{ github.repository }}
-          gh run download -n INTERFREE-TV-PRO-LOGO-NUEVO -R ${{ github.repository }}
-      - name: Informe
-        run: |
-          cd w
-          AAPT=$(ls $ANDROID_HOME/build-tools/*/aapt2 | tail -1)
-          NEW=$(find . -name '*.apk' ! -name Red4TVibo.apk | head -1)
-          for f in Red4TVibo.apk "$NEW"; do
-            n=$(basename "$f")
-            $AAPT dump xmltree --file AndroidManifest.xml "$f" > "../$n.manifest.txt"
-            echo "== $n =="
-            grep -nE 'sharedUserId|authorities|E: provider|E: permission|red4tv|C2D' "../$n.manifest.txt" || true
-            mkdir x_$n && unzip -qo "$f" 'classes*.dex' -d x_$n
-            echo "dex con com.apps.red4tv: $(strings x_$n/classes*.dex | grep -c 'com.apps.red4tv')"
-          done
-      - uses: actions/upload-artifact@v4
+          sudo apt-get update
+          sudo apt-get install -y aapt2
+
+      - name: Descargar APK original (ibo-original)
+        uses: dsaltares/fetch-gh-release-asset@master
         with:
-          name: INFORME-DIAGNOSTICO
-          path: "*.manifest.txt"
+          repo: Enychopy/InterfreeIPTV
+          version: tags/ibo-original
+          file: Red4TVibo.apk
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Descargar artefacto APK nueva
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: verify-interfree-pro.yml
+          name: INTERFREE-TV-PRO-LOGO-NUEVO
+          path: ./nueva
+
+      - name: Analizar Manifiestos
+        run: |
+          mv Red4TVibo.apk original.apk
+          mv ./nueva/*.apk nueva.apk
+          
+          echo "=== INFORME DE MANIFIESTOS V2 ===" > INFORME-DIAGNOSTICO.txt
+          
+          for n in original nueva; do
+            echo "--- Analizando $n.apk ---" >> INFORME-DIAGNOSTICO.txt
+            aapt2 dump xmltree $n.apk > $n.manifest.txt
+            
+            echo ">> Authorities, sharedUserId y red4tv:" >> INFORME-DIAGNOSTICO.txt
+            grep -nE 'sharedUserId|authorities|E: provider|red4tv|C2D' $n.manifest.txt >> INFORME-DIAGNOSTICO.txt || true
+            
+            echo ">> Permisos definidos (E: permission):" >> INFORME-DIAGNOSTICO.txt
+            grep -A4 'E: permission' $n.manifest.txt >> INFORME-DIAGNOSTICO.txt || true
+            
+            echo ">> Permisos usados personalizados:" >> INFORME-DIAGNOSTICO.txt
+            grep -A1 'E: uses-permission' $n.manifest.txt | grep 'name' | grep -v 'android.permission' >> INFORME-DIAGNOSTICO.txt || true
+            echo "" >> INFORME-DIAGNOSTICO.txt
+          done
+          
+          # Mostrar en consola
+          cat INFORME-DIAGNOSTICO.txt
+
+      - name: Subir informe
+        uses: actions/upload-artifact@v4
+        with:
+          name: INFORME-DIAGNOSTICO-V2
+          path: INFORME-DIAGNOSTICO.txt
