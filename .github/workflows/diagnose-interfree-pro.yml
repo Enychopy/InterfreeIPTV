@@ -12,11 +12,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Recuperar workflow anterior y archivos de logo
+      - name: Inspeccionar workflows y commit a5ef55a
         run: |
-          echo "=== ARCHIVOS EN EL REPOSITORIO ==="
-          find . -maxdepth 4 -not -path '*/.*' | sort
+          echo "=== WORKFLOWS ACTUALES ==="
+          ls -la .github/workflows/
           echo ""
-          echo "=== WORKFLOW ANTERIOR DE BUILD ==="
-          PREV_COMMIT=$(git log -n 2 --format="%H" -- .github/workflows/build-interfree-pro.yml | tail -n 1)
-          git show "$PREV_COMMIT:.github/workflows/build-interfree-pro.yml"
+          echo "=== CONTENIDO DE build-interfree-pro.yml EN a5ef55a ==="
+          git show a5ef55a:.github/workflows/build-interfree-pro.yml
+          echo ""
+          echo "=== CONTENIDO DE verify-interfree-pro.yml ==="
+          cat .github/workflows/verify-interfree-pro.yml || true
