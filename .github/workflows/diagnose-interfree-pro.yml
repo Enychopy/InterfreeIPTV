@@ -1,0 +1,33 @@
+name: diagnose-interfree-pro
+on: workflow_dispatch
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Descargar APKs
+        run: |
+          mkdir w && cd w
+          gh release download ibo-original -p Red4TVibo.apk -R ${{ github.repository }}
+          gh run download -n INTERFREE-TV-PRO-LOGO-NUEVO -R ${{ github.repository }}
+      - name: Informe
+        run: |
+          cd w
+          AAPT=$(ls $ANDROID_HOME/build-tools/*/aapt2 | tail -1)
+          NEW=$(find . -name '*.apk' ! -name Red4TVibo.apk | head -1)
+          for f in Red4TVibo.apk "$NEW"; do
+            n=$(basename "$f")
+            $AAPT dump xmltree --file AndroidManifest.xml "$f" > "../$n.manifest.txt"
+            echo "== $n =="
+            grep -nE 'sharedUserId|authorities|E: provider|E: permission|red4tv|C2D' "../$n.manifest.txt" || true
+            mkdir x_$n && unzip -qo "$f" 'classes*.dex' -d x_$n
+            echo "dex con com.apps.red4tv: $(strings x_$n/classes*.dex | grep -c 'com.apps.red4tv')"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: INFORME-DIAGNOSTICO
+          path: "*.manifest.txt"
