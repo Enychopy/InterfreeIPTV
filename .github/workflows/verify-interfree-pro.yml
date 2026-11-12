@@ -1,0 +1,89 @@
+
+name: Verify INTERFREE TV PRO
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar APK original
+        run: |
+          curl -L --fail -o Red4TVibo.apk \
+          https://github.com/Enychopy/InterfreeIPTV/releases/download/ibo-original/Red4TVibo.apk
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Descargar Apktool
+        run: |
+          curl -L --fail -o apktool.jar \
+          https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar
+
+      - name: Descomprimir APK original
+        run: |
+          java -jar apktool.jar d -f Red4TVibo.apk -o decoded
+
+      - name: Cambiar identidad de la aplicación
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          old = "com.apps.red4tv"
+          new = "com.interfree.tvpro"
+
+          for folder in ["decoded/smali", "decoded/smali_classes2",
+                         "decoded/smali_classes3", "decoded/res",
+                         "decoded/assets"]:
+              root = Path(folder)
+              if root.exists():
+                  for file in root.rglob("*"):
+                      if file.is_file():
+                          try:
+                              data = file.read_text(encoding="utf-8")
+                              changed = data.replace(old, new)
+                              if changed != data:
+                                  file.write_text(changed, encoding="utf-8")
+                          except (UnicodeDecodeError, OSError):
+                              pass
+
+          manifest = Path("decoded/AndroidManifest.xml")
+          data = manifest.read_text(encoding="utf-8")
+          data = data.replace(old, new)
+          data = data.replace('Red4TV', 'INTERFREE TV PRO')
+          manifest.write_text(data, encoding="utf-8")
+          PY
+
+      - name: Compilar APK
+        run: |
+          java -jar apktool.jar b decoded -o INTERFREE-TV-PRO-unsigned.apk
+
+      - name: Firmar APK
+        run: |
+          curl -L --fail -o uber-apk-signer.jar \
+          https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar
+          java -jar uber-apk-signer.jar --apks INTERFREE-TV-PRO-unsigned.apk --out signed --allowResign
+
+      - name: Instalar herramientas Android
+        uses: android-actions/setup-android@v3
+
+      - name: Preparar verificación
+        run: |
+          sdkmanager "build-tools;35.0.0"
+
+      - name: Verificar firma y paquete
+        run: |
+          APK=$(find signed -name '*.apk' -print -quit)
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          java -jar apktool.jar d -f "$APK" -o verified
+          grep -q 'package="com.interfree.tvpro"' verified/AndroidManifest.xml
+          echo "VERIFICACION COMPLETADA"
