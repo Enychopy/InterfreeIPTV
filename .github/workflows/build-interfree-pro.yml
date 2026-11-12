@@ -3,6 +3,9 @@ name: Construir INTERFREE TV PRO
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -187,7 +190,6 @@ jobs:
               out_img = fit_on_canvas(logo, size)
               out_img.save(file)
 
-          # Crear fotograma HD 1280x720 para el video intro.mp4
           intro_bg = Image.new("RGBA", (1280, 720), (10, 10, 16, 255))
           lw, lh = logo.size
           scale = min(420 / lw, 420 / lh)
@@ -212,8 +214,21 @@ jobs:
       - name: Firmar APK con Uber APK Signer (V3)
         run: java -jar uber-apk-signer.jar -a INTERFREE-TV-PRO-UNALIGNED.apk --allowResign -o ./build_final
 
-      - name: Subir APK final
+      - name: Subir APK final (Artefacto)
         uses: actions/upload-artifact@v4
         with:
           name: INTERFREE-TV-PRO-FINAL
           path: ./build_final/*.apk
+
+      - name: Publicar enlace directo en GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp ./build_final/*.apk ./INTERFREE-TV-PRO.apk
+          if gh release view v1.0 >/dev/null 2>&1; then
+            gh release upload v1.0 ./INTERFREE-TV-PRO.apk --clobber
+          else
+            gh release create v1.0 ./INTERFREE-TV-PRO.apk \
+              --title "INTERFREE TV PRO v1.0" \
+              --notes "Instalador oficial INTERFREE TV PRO"
+          fi
