@@ -7,58 +7,16 @@ jobs:
   diag:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout del repositorio
+      - name: Checkout con historial completo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Configurar aapt2
+      - name: Recuperar workflow anterior y archivos de logo
         run: |
-          AAPT2_PATH=$(find $ANDROID_HOME/build-tools -name "aapt2" -type f -executable | sort -r | head -n 1)
-          sudo ln -s "$AAPT2_PATH" /usr/local/bin/aapt2
-          aapt2 version
-
-      - name: Descargar APK original (ibo-original)
-        uses: dsaltares/fetch-gh-release-asset@master
-        with:
-          repo: Enychopy/InterfreeIPTV
-          version: tags/ibo-original
-          file: Red4TVibo.apk
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Descargar artefacto APK nueva
-        uses: dawidd6/action-download-artifact@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: verify-interfree-pro.yml
-          name: INTERFREE-TV-PRO-LOGO-NUEVO
-          path: ./nueva
-
-      - name: Analizar Manifiestos
-        run: |
-          mv Red4TVibo.apk original.apk
-          mv ./nueva/*.apk nueva.apk
-          
-          echo "=== INFORME DE MANIFIESTOS V2 ===" > INFORME-DIAGNOSTICO.txt
-          
-          for n in original nueva; do
-            echo "--- Analizando $n.apk ---" >> INFORME-DIAGNOSTICO.txt
-            # Línea corregida agregando --file AndroidManifest.xml
-            aapt2 dump xmltree --file AndroidManifest.xml $n.apk > $n.manifest.txt
-            
-            echo ">> Authorities, sharedUserId y red4tv:" >> INFORME-DIAGNOSTICO.txt
-            grep -nE 'sharedUserId|authorities|E: provider|red4tv|C2D' $n.manifest.txt >> INFORME-DIAGNOSTICO.txt || true
-            
-            echo ">> Permisos definidos (E: permission):" >> INFORME-DIAGNOSTICO.txt
-            grep -A4 'E: permission' $n.manifest.txt >> INFORME-DIAGNOSTICO.txt || true
-            
-            echo ">> Permisos usados personalizados:" >> INFORME-DIAGNOSTICO.txt
-            grep -A1 'E: uses-permission' $n.manifest.txt | grep 'name' | grep -v 'android.permission' >> INFORME-DIAGNOSTICO.txt || true
-            echo "" >> INFORME-DIAGNOSTICO.txt
-          done
-          
-          cat INFORME-DIAGNOSTICO.txt
-
-      - name: Subir informe
-        uses: actions/upload-artifact@v4
-        with:
-          name: INFORME-DIAGNOSTICO-V2
-          path: INFORME-DIAGNOSTICO.txt
+          echo "=== ARCHIVOS EN EL REPOSITORIO ==="
+          find . -maxdepth 4 -not -path '*/.*' | sort
+          echo ""
+          echo "=== WORKFLOW ANTERIOR DE BUILD ==="
+          PREV_COMMIT=$(git log -n 2 --format="%H" -- .github/workflows/build-interfree-pro.yml | tail -n 1)
+          git show "$PREV_COMMIT:.github/workflows/build-interfree-pro.yml"
