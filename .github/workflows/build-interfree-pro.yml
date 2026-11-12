@@ -32,7 +32,7 @@ jobs:
       - name: Descompilar APK
         run: java -jar apktool.jar d -f Red4TVibo.apk -o decoded
 
-      - name: Cambiar paquete, nombre y permiso conflictivo
+      - name: Cambiar paquete, nombre, permiso conflictivo y quitar texto Cali TV
         run: |
           python3 - <<'PY'
           import re
@@ -40,7 +40,7 @@ jobs:
 
           root = Path("decoded")
 
-          # 1. Reemplazos seguros en codigo smali
+          # 1. Reemplazos en codigo smali
           for smali in root.glob("smali*"):
               for file in smali.rglob("*.smali"):
                   content = file.read_text(encoding="utf-8", errors="ignore")
@@ -49,10 +49,28 @@ jobs:
                       "com.apps.amigostv.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSIONbpwsck",
                       "com.interfree.tvpro.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
                   )
+                  updated = re.sub(r"Bienvenido a Cali(\s*TV)?", "", updated, flags=re.IGNORECASE)
+                  updated = re.sub(r"Cali\s*TV", "INTERFREE TV PRO", updated, flags=re.IGNORECASE)
                   if updated != content:
                       file.write_text(updated, encoding="utf-8")
 
-          # 2. Reemplazos de paquete, permiso y marca en XML y recursos
+          # 2. Limpiar texto en assets (languages.json)
+          assets_dir = root / "assets"
+          if assets_dir.exists():
+              for file in assets_dir.rglob("*"):
+                  if not file.is_file():
+                      continue
+                  try:
+                      content = file.read_text(encoding="utf-8")
+                      updated = re.sub(r"Bienvenido a Cali(\s*TV)?", "", content, flags=re.IGNORECASE)
+                      updated = re.sub(r"Cali\s*TV", "INTERFREE TV PRO", updated, flags=re.IGNORECASE)
+                      updated = re.sub(r"red4tv", "INTERFREE TV PRO", updated, flags=re.IGNORECASE)
+                      if updated != content:
+                          file.write_text(updated, encoding="utf-8")
+                  except UnicodeDecodeError:
+                      pass
+
+          # 3. Reemplazos de paquete, permiso y marca en XML y recursos
           xml_targets = [root / "AndroidManifest.xml"] + list((root / "res").rglob("*.xml"))
           for file in xml_targets:
               if not file.is_file():
@@ -63,12 +81,27 @@ jobs:
                   "com.apps.amigostv.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSIONbpwsck",
                   "com.interfree.tvpro.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
               )
+              updated = re.sub(r"Bienvenido a Cali(\s*TV)?", "", updated, flags=re.IGNORECASE)
               updated = re.sub(r"red4tv", "INTERFREE TV PRO", updated, flags=re.IGNORECASE)
               updated = re.sub(r"cali\s*tv", "INTERFREE TV PRO", updated, flags=re.IGNORECASE)
               if updated != content:
                   file.write_text(updated, encoding="utf-8")
 
-          # 3. Forzar etiqueta principal en AndroidManifest.xml y strings.xml
+          # 4. Ocultar el TextView debajo del logo derecho y equilibrar el margen del recuadro
+          sub_xml = root / "res" / "layout" / "fragment_subscription.xml"
+          if sub_xml.exists():
+              s_xml = sub_xml.read_text(encoding="utf-8")
+              s_xml = s_xml.replace(
+                  'android:id="@id/linearLayout"',
+                  'android:id="@id/linearLayout" android:paddingBottom="@dimen/_10sdp"',
+              )
+              s_xml = s_xml.replace(
+                  'android:id="@id/str_scan_code"',
+                  'android:id="@id/str_scan_code" android:visibility="gone"',
+              )
+              sub_xml.write_text(s_xml, encoding="utf-8")
+
+          # 5. Forzar etiqueta principal en AndroidManifest.xml y strings.xml
           manifest = root / "AndroidManifest.xml"
           m_text = manifest.read_text(encoding="utf-8")
           m_text = re.sub(
@@ -144,7 +177,6 @@ jobs:
               canvas.paste(resized, ((tw - new_w) // 2, (th - new_h) // 2), resized)
               return canvas
 
-          count = 0
           for file in sorted((root / "res").rglob("*")):
               if not file.is_file() or file.suffix.lower() not in (".png", ".webp"):
                   continue
@@ -154,10 +186,6 @@ jobs:
                   size = original.size
               out_img = fit_on_canvas(logo, size)
               out_img.save(file)
-              print(f"Reemplazado: {file.relative_to(root)} ({size[0]}x{size[1]})")
-              count += 1
-
-          print(f"Total de graficos reemplazados: {count}")
 
           # Crear fotograma HD 1280x720 para el video intro.mp4
           intro_bg = Image.new("RGBA", (1280, 720), (10, 10, 16, 255))
@@ -168,7 +196,6 @@ jobs:
           intro_bg.paste(logo_intro, ((1280 - nw) // 2, (720 - nh) // 2), logo_intro)
           intro_bg.convert("RGB").save("intro_frame.png")
 
-          # Asegurar que mp4 no se comprima en apktool.yml para que VideoView lo reproduzca
           yml_path = root / "apktool.yml"
           if yml_path.exists():
               yml = yml_path.read_text(encoding="utf-8")
