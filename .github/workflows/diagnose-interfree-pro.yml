@@ -10,10 +10,12 @@ jobs:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
 
-      - name: Instalar herramientas (aapt2)
+      - name: Configurar aapt2
         run: |
-          sudo apt-get update
-          sudo apt-get install -y aapt2
+          # Buscar aapt2 en el SDK de Android ya instalado y enlazarlo globalmente
+          AAPT2_PATH=$(find $ANDROID_HOME/build-tools -name "aapt2" -type f -executable | sort -r | head -n 1)
+          sudo ln -s "$AAPT2_PATH" /usr/local/bin/aapt2
+          aapt2 version
 
       - name: Descargar APK original (ibo-original)
         uses: dsaltares/fetch-gh-release-asset@master
@@ -53,7 +55,6 @@ jobs:
             echo "" >> INFORME-DIAGNOSTICO.txt
           done
           
-          # Mostrar en consola
           cat INFORME-DIAGNOSTICO.txt
 
       - name: Subir informe
