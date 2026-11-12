@@ -12,7 +12,6 @@ jobs:
 
       - name: Configurar aapt2
         run: |
-          # Buscar aapt2 en el SDK de Android ya instalado y enlazarlo globalmente
           AAPT2_PATH=$(find $ANDROID_HOME/build-tools -name "aapt2" -type f -executable | sort -r | head -n 1)
           sudo ln -s "$AAPT2_PATH" /usr/local/bin/aapt2
           aapt2 version
@@ -42,7 +41,8 @@ jobs:
           
           for n in original nueva; do
             echo "--- Analizando $n.apk ---" >> INFORME-DIAGNOSTICO.txt
-            aapt2 dump xmltree $n.apk > $n.manifest.txt
+            # Línea corregida agregando --file AndroidManifest.xml
+            aapt2 dump xmltree --file AndroidManifest.xml $n.apk > $n.manifest.txt
             
             echo ">> Authorities, sharedUserId y red4tv:" >> INFORME-DIAGNOSTICO.txt
             grep -nE 'sharedUserId|authorities|E: provider|red4tv|C2D' $n.manifest.txt >> INFORME-DIAGNOSTICO.txt || true
