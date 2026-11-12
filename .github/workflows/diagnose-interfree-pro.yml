@@ -7,15 +7,22 @@ jobs:
   diag:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout con historial completo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Leer verify-interfree-pro y commit a710a48
+      - name: Descargar APK original y Apktool
         run: |
-          echo "=== VERIFY-INTERFREE-PRO.YML ==="
-          cat .github/workflows/verify-interfree-pro.yml
+          curl -L --fail -o Red4TVibo.apk https://github.com/Enychopy/InterfreeIPTV/releases/download/ibo-original/Red4TVibo.apk
+          curl -L --fail -o apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar
+          java -jar apktool.jar d -f Red4TVibo.apk -o decoded
+
+      - name: Inspeccionar intro, assets y pantalla de activacion
+        run: |
+          echo "=== ARCHIVOS EN ASSETS Y RES/RAW ==="
+          find decoded/assets decoded/res/raw -type f 2>/dev/null | sort
           echo ""
-          echo "=== BUILD ORIGINAL EN a710a48 ==="
-          git show a710a48:.github/workflows/build-interfree-pro.yml
+          echo "=== LAYOUTS DE SPLASH / INTRO ==="
+          find decoded/res/layout* -type f \( -iname "*splash*" -o -iname "*intro*" \) -exec head -n 60 {} +
+          echo ""
+          echo "=== LAYOUT DONDE ESTA trans_logo ==="
+          grep -rn "trans_logo" decoded/res/layout* -C 15 || true
+          echo ""
+          echo "=== REFERENCIAS A Cali TV O PANEL EN SMALI/ASSETS ==="
+          grep -rni "cali" decoded/assets decoded/smali* 2>/dev/null | head -n 30 || true
