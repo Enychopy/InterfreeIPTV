@@ -1,0 +1,66 @@
+
+name: Build FAMILY TV
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: family-tv
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Descomprimir proyecto
+        run: |
+          set -e
+          mkdir -p unpacked
+          unzip -oq FAMILY_TV_base_adaptada.zip -d unpacked
+          SETTINGS=$(find unpacked -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
+          test -n "$SETTINGS"
+          PROJECT_DIR=$(dirname "$SETTINGS")
+          test -f "$PROJECT_DIR/app/build.gradle" -o -f "$PROJECT_DIR/app/build.gradle.kts"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Compilar FAMILY TV
+        run: |
+          set -o pipefail
+          gradle -p "$PROJECT_DIR" assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Preparar APK
+        run: |
+          mkdir -p output
+          APK=$(find "$PROJECT_DIR/app/build/outputs/apk" -name '*.apk' -print -quit)
+          test -n "$APK"
+          cp "$APK" output/FAMILY-TV.apk
+
+      - name: Publicar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FAMILY-TV-APK
+          path: output/FAMILY-TV.apk
+
+      - name: Guardar registro
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FAMILY-TV-build-log
+          path: build.log
+          if-no-files-found: ignore
