@@ -2,6 +2,12 @@
 name: Build FAMILY TV
 
 on:
+  push:
+    branches:
+      - family-tv
+    paths:
+      - 'FAMILY_TV_base_adaptada.zip'
+      - '.github/workflows/build-family-tv.yml'
   workflow_dispatch:
 
 permissions:
@@ -12,12 +18,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Descargar repositorio
         uses: actions/checkout@v4
         with:
           ref: family-tv
 
-      - name: Configurar Java
+      - name: Configurar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -28,39 +34,70 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Descomprimir proyecto
+      - name: Descomprimir proyecto FAMILY TV
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          ZIP="FAMILY_TV_base_adaptada.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: No se encontró $ZIP"
+            exit 1
+          fi
+
           mkdir -p unpacked
-          unzip -oq FAMILY_TV_base_adaptada.zip -d unpacked
+          unzip -oq "$ZIP" -d unpacked
+
           SETTINGS=$(find unpacked -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
-          test -n "$SETTINGS"
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: No se encontró settings.gradle"
+            exit 1
+          fi
+
           PROJECT_DIR=$(dirname "$SETTINGS")
-          test -f "$PROJECT_DIR/app/build.gradle" -o -f "$PROJECT_DIR/app/build.gradle.kts"
+
+          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            echo "ERROR: No se encontró el módulo app"
+            exit 1
+          fi
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Proyecto localizado: $PROJECT_DIR"
 
       - name: Compilar FAMILY TV
+        shell: bash
         run: |
           set -o pipefail
-          gradle -p "$PROJECT_DIR" assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+          gradle -p "$PROJECT_DIR" assembleDebug --no-daemon --stacktrace 2>&1 | tee build-family-tv.log
 
       - name: Preparar APK
+        shell: bash
         run: |
-          mkdir -p output
-          APK=$(find "$PROJECT_DIR/app/build/outputs/apk" -name '*.apk' -print -quit)
-          test -n "$APK"
-          cp "$APK" output/FAMILY-TV.apk
+          set -euo pipefail
 
-      - name: Publicar APK
+          APK=$(find "$PROJECT_DIR/app/build/outputs/apk" -type f -name '*.apk' -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: No se encontró el APK generado"
+            exit 1
+          fi
+
+          mkdir -p output
+          cp "$APK" output/FAMILY-TV.apk
+          ls -lh output/FAMILY-TV.apk
+
+      - name: Publicar APK FAMILY TV
         uses: actions/upload-artifact@v4
         with:
           name: FAMILY-TV-APK
           path: output/FAMILY-TV.apk
+          if-no-files-found: error
 
-      - name: Guardar registro
+      - name: Guardar registro de compilación
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: FAMILY-TV-build-log
-          path: build.log
+          path: build-family-tv.log
           if-no-files-found: ignore
