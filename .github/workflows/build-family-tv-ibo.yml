@@ -15,136 +15,145 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with: { ref: family-tv }
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '17' }
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: family-tv
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Setup Android tools
         run: |
           BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          test -n "$BUILD_TOOLS"
           echo "$BUILD_TOOLS" >> "$GITHUB_PATH"
 
-      - name: Download base + apktool
+      - name: Download INTERFREE TV PRO base
         run: |
-          curl -fL --retry 3 "https://github.com/Enychopy/InterfreeIPTV/releases/download/v1.0/INTERFREE-TV-PRO.apk" -o base.apk
-          curl -fL --retry 3 "https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar" -o apktool.jar
+          curl -fL --retry 3 \
+            "https://github.com/Enychopy/InterfreeIPTV/releases/download/v1.0/INTERFREE-TV-PRO.apk" \
+            -o base.apk
+          test -s base.apk
+          ls -lh base.apk
 
-      - name: Decode
-        run: java -jar apktool.jar d -f base.apk -o decoded
-
-      - name: Diagnose real branding
+      - name: Download Apktool
         run: |
-          echo "=== Layouts login ==="
-          grep -R "ImageView" decoded/res/layout/ | grep -i logo || true
-          grep -R "@drawable" decoded/res/layout/ | grep -i login || true
-          echo "=== All logo pngs ==="
-          find decoded/res -name "*.png" | grep -i -E "logo|banner|trans|splash|sp_bg" | sort
-          echo "=== Where is liontv ==="
-          grep -R "liontv" decoded/ --include="*.smali" --include="*.xml" -n | head -n 100 || true
-          strings decoded/lib/arm64-v8a/*.so 2>/dev/null | grep -E "http|liontv" | head -n 20 || true
-          cat decoded/res/values/strings.xml | grep -i -E "url|host|liontv" || true
+          curl -fL --retry 3 \
+            "https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar" \
+            -o apktool.jar
 
-      - name: Apply graphic assets MULTI-DENSITY
+      - name: Decode APK
         run: |
+          java -jar apktool.jar d -f base.apk -o decoded
+
+      - name: Diagnose real branding and server
+        run: |
+          echo "=== Layouts que usan logo ==="
+          grep -R "ImageView\|@drawable" decoded/res/layout/ | grep -i -E "logo|trans|splash|banner" || true
+          echo ""
+          echo "=== Todos los PNGs con marca ==="
+          find decoded/res -name "*.png" | grep -i -E "logo|banner|trans|splash|sp_bg|ic_launcher" | sort
+          echo ""
+          echo "=== Strings con http ==="
+          grep -R "http" decoded/res/values/ --include="*.xml" -n | head -n 50 || true
+          echo ""
+          echo "=== Smali con player_api / get.php / http ==="
+          grep -R -n "player_api\|get.php\|http" decoded/smali* --include="*.smali" | head -n 100 || true
+          echo ""
+          echo "=== Posible URL en .so ==="
+          strings decoded/lib/*/*.so 2>/dev/null | grep -E "http|ultratv" | head -n 20 || true
+
+      - name: Apply FAMILY TV graphic assets MULTI-DENSITY
+        run: |
+          test -s familytv_rebrand_payload.zip
+          unzip -t familytv_rebrand_payload.zip
+          rm -rf /tmp/familytv
           unzip -o familytv_rebrand_payload.zip -d /tmp/familytv
-          # Copia tu logo a TODAS las variantes v4 y base
-          for src in /tmp/familytv/res/drawable/trans_logo.png /tmp/familytv/res/drawable/logo.png /tmp/familytv/trans_logo.png; do
-            [ -f "$src" ] && LOGO_SRC="$src" && break
-          done
-          echo "Logo src: $LOGO_SRC"
-          find decoded/res -type d -name "drawable*" | while read d; do
-            [ -f "$LOGO_SRC" ] && cp -f "$LOGO_SRC" "$d/trans_logo.png" 2>/dev/null || true
-            [ -f "$LOGO_SRC" ] && cp -f "$LOGO_SRC" "$d/logo.png" 2>/dev/null || true
-            [ -f "$LOGO_SRC" ] && cp -f "$LOGO_SRC" "$d/ic_logo.png" 2>/dev/null || true
-          done
-          # Banners y iconos igual
-          find decoded/res -type d -name "drawable*" | while read d; do
-            [ -f /tmp/familytv/res/drawable/banner.png ] && cp -f /tmp/familytv/res/drawable/banner.png "$d/banner.png" || true
-            [ -f /tmp/familytv/banner.png ] && cp -f /tmp/familytv/banner.png "$d/banner.png" || true
-          done
-          find decoded/res -type d -name "mipmap*" | while read d; do
-            [ -f /tmp/familytv/res/mipmap-xxxhdpi/ic_launcher.png ] && cp -f /tmp/familytv/res/mipmap-xxxhdpi/ic_launcher.png "$d/ic_launcher.png" || true
-          done
-          # Sobrescribe también assets si existen
-          find decoded/assets -name "*.png" 2>/dev/null | xargs -I{} cp -f "$LOGO_SRC" {} 2>/dev/null || true
 
-      - name: Rebrand + URL + Package fix
+          LOGO_SRC=""
+          for cand in "/tmp/familytv/res/drawable-xxxhdpi/trans_logo.png" "/tmp/familytv/res/drawable/trans_logo.png" "/tmp/familytv/trans_logo.png" "/tmp/familytv/logo.png" "/tmp/familytv/res/mipmap-xxxhdpi/ic_launcher.png"; do
+            if [ -f "$cand" ]; then LOGO_SRC="$cand"; break; fi
+          done
+          if [ -z "$LOGO_SRC" ]; then
+            LOGO_SRC=$(find /tmp/familytv -name "*.png" | head -n 1)
+          fi
+          echo "Logo fuente detectado: $LOGO_SRC"
+          test -n "$LOGO_SRC"
+
+          find decoded/res -type d -name "drawable*" | while read d; do
+            cp -f "$LOGO_SRC" "$d/trans_logo.png" 2>/dev/null || true
+            cp -f "$LOGO_SRC" "$d/trans_logo_alt.png" 2>/dev/null || true
+            cp -f "$LOGO_SRC" "$d/logo.png" 2>/dev/null || true
+            cp -f "$LOGO_SRC" "$d/ic_logo.png" 2>/dev/null || true
+            cp -f "$LOGO_SRC" "$d/app_logo.png" 2>/dev/null || true
+            cp -f "$LOGO_SRC" "$d/splash_logo.png" 2>/dev/null || true
+          done
+
+          BANNER_SRC=$(find /tmp/familytv -name "banner.png" | head -n 1)
+          if [ -n "$BANNER_SRC" ]; then
+            find decoded/res -type d -name "drawable*" | while read d; do
+              cp -f "$BANNER_SRC" "$d/banner.png" 2>/dev/null || true
+            done
+          fi
+
+          ICON_SRC=$(find /tmp/familytv -name "ic_launcher.png" | head -n 1)
+          if [ -n "$ICON_SRC" ]; then
+            find decoded/res -type d -name "mipmap*" | while read d; do
+              cp -f "$ICON_SRC" "$d/ic_launcher.png" 2>/dev/null || true
+              cp -f "$ICON_SRC" "$d/ic_launcher_round.png" 2>/dev/null || true
+              cp -f "$ICON_SRC" "$d/ic_launcher_foreground.png" 2>/dev/null || true
+            done
+          fi
+
+          find decoded/assets -name "*.png" 2>/dev/null | while read a; do
+            cp -f "$LOGO_SRC" "$a" 2>/dev/null || true
+          done || true
+
+          echo "Recursos FAMILY TV aplicados en todas las densidades"
+
+      - name: Rebrand FAMILY TV - URL generica ultratv-lat.online
         run: |
           python3 - <<'PY'
-          import re, pathlib, os
-          root = pathlib.Path("decoded")
-          old_host = "liontv.es:8080"
-          new_host = "ultratv-lat.online:80"
-          new_http = f"http://{new_host}"
-          
-          # 1. Replace en todos los smali y xml (utf-8)
+          import re
+          from pathlib import Path
+
+          root = Path("decoded")
+          NEW_HOST = "ultratv-lat.online:80"
+          NEW_URL = f"http://{NEW_HOST}"
+          url_pattern = re.compile(r'https?://[a-zA-Z0-9\.\-_:]+(?::\d+)?')
+
+          count = 0
           for p in root.rglob("*"):
-            if not p.is_file(): continue
-            if p.suffix in (".png",".jpg",".webp",".so",".dex",".arsc"): continue
-            try:
-              t = p.read_text(encoding="utf-8")
-            except: continue
-            orig = t
-            t = t.replace("com.interfree.tvpro", "com.familytv.player")
-            t = t.replace("com.interfree", "com.familytv")
-            t = t.replace("http://liontv.es:8080", new_http)
-            t = t.replace("https://liontv.es:8080", new_http)
-            t = t.replace("liontv.es:8080", new_host)
-            t = t.replace("liontv.es", "ultratv-lat.online")
-            t = t.replace("INTERFREE TV PRO", "FAMILY TV")
-            t = t.replace("INTERFREE-TV-PRO", "FAMILY-TV")
-            t = t.replace("INTERFREE TV", "FAMILY TV")
-            # authorities
-            t = re.sub(r'com\.interfree\.tvpro\.provider', 'com.familytv.player.provider', t)
-            if t != orig:
-              p.write_text(t, encoding="utf-8")
+              if not p.is_file(): continue
+              if p.suffix in (".png", ".jpg", ".jpeg", ".webp", ".so", ".dex", ".arsc", ".mp3", ".wav"): continue
+              try:
+                  text = p.read_text(encoding="utf-8")
+              except:
+                  continue
+              orig = text
+              text = text.replace("com.interfree.tvpro", "com.familytv.player")
+              text = text.replace("com.interfree", "com.familytv")
+              text = text.replace("INTERFREE TV PRO", "FAMILY TV")
+              text = text.replace("INTERFREE-TV-PRO", "FAMILY-TV")
+              text = text.replace("INTERFREE TV", "FAMILY TV")
+              text = text.replace("INTERFREE", "FAMILY")
 
-          # 2. Fix AndroidManifest authorities
-          mf = root/"AndroidManifest.xml"
-          txt = mf.read_text(encoding="utf-8")
-          txt = re.sub(r'android:authorities="[^"]*interfree[^"]*"', 'android:authorities="com.familytv.player.provider"', txt)
-          mf.write_text(txt, encoding="utf-8")
+              lower_path = str(p).lower()
+              is_candidate = (
+                  "smali" in lower_path or "config" in lower_path or "constant" in lower_path or
+                  "api" in lower_path or "server" in lower_path or "url" in lower_path or
+                  "values" in lower_path or "strings" in lower_path or
+                  "player_api" in text or "get.php" in text
+              )
 
-          # 3. Network security config para permitir http://ultratv-lat.online
-          xml_dir = root/"res/xml"
-          xml_dir.mkdir(parents=True, exist_ok=True)
-          (xml_dir/"network_security_config.xml").write_text('''<?xml version="1.0" encoding="utf-8"?>
-          <network-security-config>
-            <domain-config cleartextTrafficPermitted="true">
-              <domain includeSubdomains="true">ultratv-lat.online</domain>
-            </domain-config>
-            <base-config cleartextTrafficPermitted="true"/>
-          </network-security-config>''', encoding="utf-8")
-          
-          # 4. Asegurar manifest apunta a network config
-          if "networkSecurityConfig" not in txt:
-              txt = txt.replace("<application", '<application android:networkSecurityConfig="@xml/network_security_config" android:usesCleartextTraffic="true"')
-              mf.write_text(txt, encoding="utf-8")
-
-          # 5. Patch apktool.yml
-          yml = root/"apktool.yml"
-          if yml.exists():
-              y = yml.read_text(encoding="utf-8")
-              y = y.replace("com.interfree.tvpro", "com.familytv.player")
-              if "renameManifestPackage" not in y:
-                  y += "\nrenameManifestPackage: com.familytv.player\n"
-              yml.write_text(y, encoding="utf-8")
-          print("Rebrand done")
-          PY
-
-      - name: Build and Sign
-        run: |
-          java -jar apktool.jar b decoded -o FAMILY-TV-unsigned.apk
-          keytool -genkeypair -v -keystore family-tv.jks -storepass familytv123 -keypass familytv123 -alias familytv -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=FAMILY TV, OU=Apps, O=FAMILY TV, L=San Salvador, ST=San Salvador, C=SV"
-          zipalign -p -f 4 FAMILY-TV-unsigned.apk FAMILY-TV-aligned.apk
-          apksigner sign --ks family-tv.jks --ks-key-alias familytv --ks-pass pass:familytv123 --key-pass pass:familytv123 --out FAMILY-TV.apk FAMILY-TV-aligned.apk
-          apksigner verify --verbose FAMILY-TV.apk
-          aapt dump badging FAMILY-TV.apk | grep "com.familytv.player"
-          echo "=== Verify URL ==="
-          strings FAMILY-TV.apk | grep -E "ultratv|liontv" | head -n 20 || true
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: FAMILY-TV-APK
-          path: FAMILY-TV.apk
-          if-no-files-found: error
+              if is_candidate and "http" in text:
+                  def replace_url_match(m):
+                      url = m.group(0)
+                      if any(x in url for x in ["google", "facebook", "android", "gstatic"]):
+                          return url
+                      return NEW_URL
+                  text = url_pattern.sub
