@@ -1,0 +1,87 @@
+
+name: Build FAMILY TV - Original IBO Player
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: family-tv
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build tools
+        run: |
+          sdkmanager "build-tools;35.0.0"
+          echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
+
+      - name: Download FAMILY TV source
+        run: |
+          curl -fL --retry 3 \
+            "https://github.com/Enychopy/InterfreeIPTV/releases/download/family-tv-source-v1/FAMILY_TV_IBO_PLAYER_rebranded_source.zip" \
+            -o family-tv-source.zip
+
+          unzip -q family-tv-source.zip -d source
+
+          test -f source/ibo-decoded/apktool.yml
+          test -f source/ibo-decoded/AndroidManifest.xml
+
+      - name: Download Apktool
+        run: |
+          curl -fL --retry 3 \
+            "https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar" \
+            -o apktool.jar
+
+      - name: Rebuild original IBO Player
+        run: |
+          java -jar apktool.jar b source/ibo-decoded \
+            -o FAMILY_TV-unsigned.apk
+
+      - name: Generate signing key
+        run: |
+          keytool -genkeypair -v \
+            -keystore family-tv.jks \
+            -storepass familytv123 \
+            -keypass familytv123 \
+            -alias familytv \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=FAMILY TV, OU=Apps, O=FAMILY TV, L=San Salvador, ST=San Salvador, C=SV"
+
+      - name: Align and sign APK
+        run: |
+          zipalign -p -f 4 FAMILY_TV-unsigned.apk FAMILY_TV-aligned.apk
+
+          apksigner sign \
+            --ks family-tv.jks \
+            --ks-key-alias familytv \
+            --ks-pass pass:familytv123 \
+            --key-pass pass:familytv123 \
+            --out FAMILY_TV.apk \
+            FAMILY_TV-aligned.apk
+
+          apksigner verify --verbose FAMILY_TV.apk
+
+      - name: Upload FAMILY TV APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FAMILY-TV-APK
+          path: FAMILY_TV.apk
+          if-no-files-found: error
