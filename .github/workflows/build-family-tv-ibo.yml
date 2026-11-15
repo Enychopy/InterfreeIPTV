@@ -28,17 +28,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platform-tools
-            build-tools;35.0.0
-            platforms;android-35
-
-      - name: Add build tools to PATH
+      - name: Locate Android tools
         run: |
-          echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+
+          if [ -z "$BUILD_TOOLS" ]; then
+            echo "Android build tools not found"
+            exit 1
+          fi
+
+          echo "$BUILD_TOOLS" >> "$GITHUB_PATH"
+          echo "Using Android tools: $BUILD_TOOLS"
 
       - name: Download FAMILY TV source
         run: |
@@ -57,7 +57,7 @@ jobs:
             "https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar" \
             -o apktool.jar
 
-      - name: Rebuild IBO Player
+      - name: Rebuild original IBO Player
         run: |
           java -jar apktool.jar b source/ibo-decoded \
             -o FAMILY_TV-unsigned.apk
@@ -88,7 +88,7 @@ jobs:
 
           apksigner verify --verbose FAMILY_TV.apk
 
-      - name: Upload APK
+      - name: Upload FAMILY TV APK
         uses: actions/upload-artifact@v4
         with:
           name: FAMILY-TV-IBO-APK
