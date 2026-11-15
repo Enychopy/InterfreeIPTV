@@ -51,6 +51,31 @@ jobs:
         run: |
           java -jar apktool.jar d -f base.apk -o decoded
 
+      - name: Apply FAMILY TV graphic assets
+        run: |
+          test -s familytv_rebrand_payload.zip
+          unzip -t familytv_rebrand_payload.zip
+          unzip -o familytv_rebrand_payload.zip -d decoded
+
+          for file in \
+            decoded/res/drawable/trans_logo.png \
+            decoded/res/drawable/trans_logo_alt.png \
+            decoded/res/drawable/sp_bg.png \
+            decoded/res/drawable-mdpi/banner.png \
+            decoded/res/drawable-hdpi/banner.png \
+            decoded/res/drawable-xhdpi/banner.png \
+            decoded/res/drawable-xxhdpi/banner.png \
+            decoded/res/drawable-xxxhdpi/banner.png \
+            decoded/res/mipmap-mdpi/ic_launcher.png \
+            decoded/res/mipmap-hdpi/ic_launcher.png \
+            decoded/res/mipmap-xhdpi/ic_launcher.png \
+            decoded/res/mipmap-xxhdpi/ic_launcher.png \
+            decoded/res/mipmap-xxxhdpi/ic_launcher.png; do
+            test -s "$file" || { echo "Falta recurso: $file"; exit 1; }
+          done
+
+          echo "Recursos FAMILY TV aplicados correctamente."
+
       - name: Rebrand FAMILY TV
         run: |
           python3 - <<'PY'
