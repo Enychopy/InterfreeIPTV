@@ -1,5 +1,5 @@
 
-name: Inspeccionar APK original para INTERFREE TV PRO
+name: Inspect IBO Player APK
 
 on:
   workflow_dispatch:
@@ -12,49 +12,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descargar repositorio
-        uses: actions/checkout@v4
-
-      - name: Descargar APK original
+      - name: Download original FAMILY TV APK
+        shell: bash
         run: |
-          curl -L --fail -o Red4TVibo.apk \
-          "https://github.com/Enychopy/InterfreeIPTV/releases/download/ibo-original/Red4TVibo.apk"
+          set -euo pipefail
+          curl -fsSL https://api.github.com/repos/Enychopy/InterfreeIPTV/releases/tags/ibo-original-v2 -o release.json
+          APK_URL="$(jq -r '.assets[] | select(.name == "Red4TV_1.38.apk") | .browser_download_url' release.json)"
+          test -n "$APK_URL" && test "$APK_URL" != "null"
+          curl -fL "$APK_URL" -o original.apk
+          ls -lh original.apk
+          sha256sum original.apk > original.sha256
 
-      - name: Instalar Apktool
+      - name: Install Apktool
         run: |
-          curl -L --fail -o apktool.jar \
-          "https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar"
+          curl -fL https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar -o apktool.jar
+          java -jar apktool.jar --version
 
-      - name: Descompilar APK
+      - name: Decompile original APK
         run: |
-          java -jar apktool.jar d -f Red4TVibo.apk -o decoded
+          java -jar apktool.jar d -f original.apk -o ibo-decoded
 
-      - name: Crear informe de inspección
+      - name: Create inspection ZIP
         run: |
           {
-            echo "=== INTERFREE TV PRO - INSPECCION ==="
-            echo ""
-            echo "=== PAQUETE Y COMPONENTES ==="
-            grep -E 'package=|android:label=|android:name=' decoded/AndroidManifest.xml | head -100
-            echo ""
-            echo "=== RECURSOS DE IMAGEN ==="
-            find decoded/res -type f \( -iname "*.png" -o -iname "*.webp" -o -iname "*.jpg" -o -iname "*.jpeg" \) | sort
-            echo ""
-            echo "=== REFERENCIAS A IBO Y RED4TV ==="
-            grep -RilE 'ibo|red4tv' decoded/res decoded/assets 2>/dev/null | head -200
-            echo ""
-            echo "=== TAMAÑO DEL APK ==="
-            ls -lh Red4TVibo.apk
+            echo "APK CHECKSUM"
+            cat original.sha256
+            echo
+            echo "APK METADATA"
+            grep -E 'versionCode|versionName' ibo-decoded/apktool.yml || true
+            echo
+            echo "PACKAGE AND COMPONENTS"
+            grep -E 'package=|android:name=|android:label=' ibo-decoded/AndroidManifest.xml | head -150 || true
+            echo
+            echo "LOGO, INTRO AND SPLASH"
+            find ibo-decoded/res ibo-decoded/assets -type f 2>/dev/null | grep -Ei 'logo|intro|splash|launcher|icon|\.mp4$' | head -250 || true
           } > inspection.txt
+          zip -qr IBO-PLAYER-DECOMPILED.zip ibo-decoded inspection.txt original.sha256
 
-      - name: Guardar archivos de inspección
+      - name: Upload decoded project
         uses: actions/upload-artifact@v4
         with:
-          name: INTERFREE-TV-PRO-inspeccion
-          path: |
-            inspection.txt
-            decoded/AndroidManifest.xml
-            decoded/res/
-            decoded/assets/
-          if-no-files-found: warn
+          name: IBO-PLAYER-DECOMPILED
+          path: IBO-PLAYER-DECOMPILED.zip
+          if-no-files-found: error
           retention-days: 7
