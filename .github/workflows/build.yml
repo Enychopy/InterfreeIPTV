@@ -3,8 +3,8 @@ name: Construir APK
 
 on:
   push:
-    branches: ['**']
-  workflow_dispatch:
+    branches:
+      - main
 
 permissions:
   contents: write
