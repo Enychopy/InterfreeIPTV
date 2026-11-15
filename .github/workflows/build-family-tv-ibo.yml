@@ -30,35 +30,26 @@ jobs:
         with:
           ref: family-tv
 
-      - name: 2. Validar payload en repositorio
+      - name: 2. Validar payload
         run: |
           set -euo pipefail
-          ls -la
-          if [ ! -f "$PAYLOAD_ZIP" ]; then
-            echo "::error::No se encontro $PAYLOAD_ZIP en la raiz de la rama family-tv"
-            exit 1
-          fi
+          test -f "$PAYLOAD_ZIP"
           unzip -l "$PAYLOAD_ZIP"
 
-      - name: 3. Configurar Java 17, Python Pillow y Android Build-Tools
+      - name: 3. Configurar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: 4. Instalar dependencias y localizar build-tools
+      - name: 4. Instalar dependencias
         run: |
           set -euo pipefail
           python3 -m pip install --quiet --upgrade pip pillow
-
           BUILD_TOOLS_DIR=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
-          if [ -z "$BUILD_TOOLS_DIR" ]; then
-            echo "::error::No se encontro Android build-tools en $ANDROID_HOME"
-            exit 1
-          fi
+          test -n "$BUILD_TOOLS_DIR"
           echo "BUILD_TOOLS_DIR=$BUILD_TOOLS_DIR" >> "$GITHUB_ENV"
           echo "$BUILD_TOOLS_DIR" >> "$GITHUB_PATH"
-          echo "Usando build-tools: $BUILD_TOOLS_DIR"
 
       - name: 5. Descargar APK base y Apktool
         env:
@@ -75,46 +66,38 @@ jobs:
 
           ls -lh base.apk apktool.jar
 
-      - name: 6. Decompilar APK base
+      - name: 6. Decompilar APK
         run: |
           set -euo pipefail
           java -Xmx2048m -jar apktool.jar d -f base.apk -o decoded
           ls -la decoded/
 
-      - name: 7. Diagnosticar marca y servidor
+      - name: 7. Diagnosticar APK original
         run: |
           set -euo pipefail
-          REPORT="diagnose-report.txt"
           {
-            echo "DIAGNOSTICO DE MARCA, LAYOUTS Y SERVIDOR"
-            echo "[1] PACKAGE Y MANIFEST ORIGINAL:"
+            echo "DIAGNOSTICO FAMILY TV"
+            echo "PACKAGE Y MANIFEST:"
             head -n 30 decoded/AndroidManifest.xml
 
-            echo "[2] LAYOUTS:"
+            echo "LAYOUTS:"
             grep -rnE "logo|splash|login|banner|brand" decoded/res/layout* 2>/dev/null || true
 
-            echo "[3] ARCHIVOS GRAFICOS:"
+            echo "ARCHIVOS GRAFICOS:"
             find decoded/res decoded/assets -type f \( -iname "*logo*" -o -iname "*banner*" -o -iname "*splash*" -o -iname "*ic_launcher*" \) 2>/dev/null | sort || true
 
-            echo "[4] STRINGS Y URL:"
+            echo "STRINGS Y URL:"
             grep -rnE "app_name|http://|https://|interfree|liontv|player_api" decoded/res/values* 2>/dev/null || true
 
-            echo "[5] ENDPOINTS XTREAM:"
+            echo "ENDPOINTS XTREAM:"
             grep -rnE "player_api\.php|get\.php|xmltv\.php" decoded/smali* 2>/dev/null | head -n 60 || true
 
-            echo "[6] URL EN SMALI:"
-            grep -rnEo "https?://[a-zA-Z0-9._:-]+(/[a-zA-Z0-9._~:/?#@!$&'()*+,;=-]*)?" decoded/smali* 2>/dev/null \
-              | grep -vE "schemas\.android\.com|w3\.org|xmlpull\.org|apache\.org|googleapis\.com|google\.com|gstatic\.com|facebook\.com|exoplayer" \
-              | head -n 80 || true
+            echo "URL EN SMALI:"
+            grep -rnEo "https?://[a-zA-Z0-9._:-]+(/[a-zA-Z0-9._~:/?#@!$&'()*+,;=-]*)?" decoded/smali* 2>/dev/null | head -n 80 || true
 
-            echo "[7] URL EN LIBRERIAS:"
-            if [ -d "decoded/lib" ]; then
-              find decoded/lib -name "*.so" | while read -r sofile; do
-                echo "--- $sofile ---"
-                strings "$sofile" | grep -E "https?://|player_api|interfree|liontv|ultratv" | head -n 40 || true
-              done
-            fi
-          } | tee "$REPORT"
+            echo "VIDEO INTRO ORIGINAL:"
+            find decoded -name "intro.mp4" -exec ls -lh {} \;
+          } | tee diagnose-report.txt
 
       - name: 8. Aplicar assets FAMILY TV
         run: |
@@ -141,25 +124,23 @@ jobs:
           else:
               payload_dir = extract_root
 
-          print(f"Raiz efectiva: {payload_dir}")
-
           candidate_logos = []
           for p in payload_dir.rglob("*"):
               if p.is_file() and p.suffix.lower() in {".png", ".webp", ".jpg", ".jpeg"}:
                   score = p.stat().st_size
                   if "xhdpi" in str(p):
-                      score += 500_000
+                      score += 500000
                   if "logo" in p.name.lower():
-                      score += 200_000
+                      score += 200000
                   candidate_logos.append((score, p))
 
           if not candidate_logos:
-              raise RuntimeError("No se encontro ninguna imagen en el payload")
+              raise RuntimeError("No se encontraron imagenes en el payload")
 
           candidate_logos.sort(key=lambda x: x[0], reverse=True)
           master_logo_path = candidate_logos[0][1]
 
-          def write_image_matching_format(src_path, dst_path):
+          def write_image(src_path, dst_path):
               dst_path.parent.mkdir(parents=True, exist_ok=True)
               ext = dst_path.suffix.lower()
               with Image.open(src_path) as im:
@@ -174,19 +155,21 @@ jobs:
                       im.save(dst_path, format="PNG")
 
           decoded_res = Path("decoded/res")
-          replaced_count = 0
           payload_res = payload_dir / "res"
+          replaced_count = 0
 
           if payload_res.exists():
               for src_file in payload_res.rglob("*"):
                   if not src_file.is_file() or src_file.suffix.lower() not in {".png", ".webp"}:
                       continue
+
                   rel_folder = src_file.parent.name
                   stem = src_file.stem
                   matching_dirs = [
                       d for d in decoded_res.iterdir()
                       if d.is_dir() and (d.name == rel_folder or d.name.startswith(rel_folder + "-v"))
                   ]
+
                   if not matching_dirs:
                       matching_dirs = [decoded_res / rel_folder]
 
@@ -195,30 +178,37 @@ jobs:
                       if existing_targets:
                           for existing in existing_targets:
                               if existing.suffix.lower() in {".png", ".webp"}:
-                                  write_image_matching_format(src_file, existing)
+                                  write_image(src_file, existing)
                                   replaced_count += 1
                       else:
-                          write_image_matching_format(src_file, target_dir / src_file.name)
+                          write_image(src_file, target_dir / src_file.name)
                           replaced_count += 1
 
-          target_keywords = ("trans_logo", "app_logo", "splash_logo", "ic_logo", "logo", "ic_launcher", "banner")
+          target_keywords = (
+              "trans_logo", "app_logo", "splash_logo",
+              "ic_logo", "logo", "ic_launcher", "banner"
+          )
+
           for base_folder in [Path("decoded/res"), Path("decoded/assets")]:
               if not base_folder.exists():
                   continue
+
               for existing in base_folder.rglob("*"):
                   if not existing.is_file() or existing.suffix.lower() not in {".png", ".webp"}:
                       continue
+
                   name_low = existing.stem.lower()
                   if name_low.startswith(("exo_", "abc_", "notification_", "googleg_")):
                       continue
+
                   if any(k == name_low or name_low.startswith(k) or name_low.endswith(k) for k in target_keywords):
                       folder_clean = existing.parent.name.split("-v")[0]
                       specific = payload_res / folder_clean / f"{existing.stem}.png"
                       src_to_use = specific if specific.exists() else master_logo_path
-                      write_image_matching_format(src_to_use, existing)
+                      write_image(src_to_use, existing)
                       replaced_count += 1
 
-          print(f"Total de graficos actualizados: {replaced_count}")
+          print(f"Graficos actualizados: {replaced_count}")
           if replaced_count == 0:
               raise RuntimeError("No se reemplazo ningun asset grafico")
           PY
@@ -238,6 +228,7 @@ jobs:
 
           xml_dir = Path("decoded/res/xml")
           xml_dir.mkdir(parents=True, exist_ok=True)
+
           nsc_path = xml_dir / "network_security_config.xml"
           nsc_path.write_text(
               '<?xml version="1.0" encoding="utf-8"?>\n'
@@ -261,10 +252,11 @@ jobs:
           tree = ET.parse(manifest_path)
           root = tree.getroot()
           old_pkg = root.attrib.get("package", "").strip()
+
           if not old_pkg:
               raise RuntimeError("No se pudo leer el package original")
 
-          print(f"Package original: {old_pkg} -> Nuevo: {target_pkg}")
+          print(f"Package original: {old_pkg} -> {target_pkg}")
           root.attrib["package"] = target_pkg
 
           app_el = root.find("application")
@@ -287,10 +279,16 @@ jobs:
 
           yml_path = Path("decoded/apktool.yml")
           yml_text = yml_path.read_text(encoding="utf-8")
+
           if "renameManifestPackage:" in yml_text:
-              yml_text = re.sub(r"renameManifestPackage:\s*.*", f"renameManifestPackage: {target_pkg}", yml_text)
+              yml_text = re.sub(
+                  r"renameManifestPackage:\s*.*",
+                  f"renameManifestPackage: {target_pkg}",
+                  yml_text
+              )
           else:
               yml_text += f"\npackageInfo:\n  forcedPackageId: '127'\n  renameManifestPackage: {target_pkg}\n"
+
           yml_path.write_text(yml_text, encoding="utf-8")
 
           for strings_file in Path("decoded/res").rglob("strings.xml"):
@@ -300,12 +298,13 @@ jobs:
               txt = re.sub(r"INTERFREE", "FAMILY", txt, flags=re.IGNORECASE)
               strings_file.write_text(txt, encoding="utf-8")
 
-          EXCLUDED_HOSTS = (
-              "schemas.android.com", "www.w3.org", "w3.org", "xmlpull.org",
-              "apache.org", "www.apache.org", "googleapis.com", "google.com",
-              "gstatic.com", "googleusercontent.com", "facebook.com", "fbcdn.net",
-              "exoplayer.dev", "themoviedb.org", "tmdb.org", "github.com",
-              "ultratv-lat.online",
+          excluded_hosts = (
+              "schemas.android.com", "www.w3.org", "w3.org",
+              "xmlpull.org", "apache.org", "www.apache.org",
+              "googleapis.com", "google.com", "gstatic.com",
+              "googleusercontent.com", "facebook.com", "fbcdn.net",
+              "exoplayer.dev", "themoviedb.org", "tmdb.org",
+              "github.com", "ultratv-lat.online"
           )
 
           url_pattern = re.compile(r"https?://([a-zA-Z0-9.-]+)(?::\d+)?")
@@ -313,53 +312,113 @@ jobs:
           def replace_portal_url(match):
               full = match.group(0)
               host = match.group(1).lower()
-              if any(host == ex or host.endswith("." + ex) for ex in EXCLUDED_HOSTS):
+              if any(host == ex or host.endswith("." + ex) for ex in excluded_hosts):
                   return full
               print(f"URL reemplazada: {full} -> {target_server}")
               return target_server
 
           target_extensions = {".smali", ".xml", ".json", ".js", ".properties", ".txt"}
           url_replacements = 0
+
           for root_dir in [
-              Path("decoded/smali"), Path("decoded/smali_classes2"),
-              Path("decoded/smali_classes3"), Path("decoded/smali_classes4"),
-              Path("decoded/res"), Path("decoded/assets")
+              Path("decoded/smali"),
+              Path("decoded/smali_classes2"),
+              Path("decoded/smali_classes3"),
+              Path("decoded/smali_classes4"),
+              Path("decoded/res"),
+              Path("decoded/assets")
           ]:
               if not root_dir.exists():
                   continue
+
               for fpath in root_dir.rglob("*"):
                   if not fpath.is_file() or fpath.suffix.lower() not in target_extensions:
                       continue
                   if fpath.name == "network_security_config.xml":
                       continue
+
                   content = fpath.read_text(encoding="utf-8", errors="ignore")
                   new_content, count = url_pattern.subn(replace_portal_url, content)
-                  if count > 0:
+
+                  if count:
                       fpath.write_text(new_content, encoding="utf-8")
                       url_replacements += count
 
-          print(f"Total de URLs reemplazadas: {url_replacements}")
+          print(f"URLs reemplazadas: {url_replacements}")
           PY
 
-      - name: 10. Usar video intro pequeño
+      - name: 10. Sustituir video intro por el pequeño
         run: |
           set -euo pipefail
-          test -f decoded/assets/intro.mp4
-          cp decoded/assets/intro.mp4 decoded/intro.mp4
-          test "$(stat -c%s decoded/intro.mp4)" -lt 500000
-          cmp decoded/assets/intro.mp4 decoded/intro.mp4
-          echo "Video intro pequeño aplicado correctamente:"
-          ls -lh decoded/assets/intro.mp4 decoded/intro.mp4
 
-      - name: 11. Reconstruir APK con Apktool
+          SMALL_VIDEO="decoded/assets/intro.mp4"
+
+          if [ ! -f "$SMALL_VIDEO" ]; then
+            echo "::error::No existe decoded/assets/intro.mp4"
+            exit 1
+          fi
+
+          SMALL_SIZE=$(stat -c%s "$SMALL_VIDEO")
+          if [ "$SMALL_SIZE" -ge 500000 ]; then
+            echo "::error::El video de assets no es el video pequeño"
+            exit 1
+          fi
+
+          find decoded -type f -name "intro.mp4" -print
+
+          while IFS= read -r VIDEO; do
+            if [ "$VIDEO" != "$SMALL_VIDEO" ]; then
+              cp "$SMALL_VIDEO" "$VIDEO"
+            fi
+          done < <(find decoded -type f -name "intro.mp4")
+
+          echo "Videos intro después del reemplazo:"
+          find decoded -type f -name "intro.mp4" -exec ls -lh {} \;
+
+          while IFS= read -r VIDEO; do
+            cmp "$SMALL_VIDEO" "$VIDEO"
+          done < <(find decoded -type f -name "intro.mp4")
+
+      - name: 11. Reconstruir APK
         run: |
           set -euo pipefail
           java -Xmx2048m -jar apktool.jar b decoded -o FAMILY-TV-unsigned.apk
           ls -lh FAMILY-TV-unsigned.apk
 
-      - name: 12. Alinear, firmar y verificar APK
+      - name: 12. Verificar video y manifiesto reconstruidos
         run: |
           set -euo pipefail
+
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          apk = Path("FAMILY-TV-unsigned.apk")
+          with zipfile.ZipFile(apk) as z:
+              videos = [
+                  (name, info.file_size)
+                  for name, info in ((i.filename, i) for i in z.infolist())
+                  if name.endswith("intro.mp4")
+              ]
+
+              print("Videos dentro del APK:")
+              for name, size in videos:
+                  print(f"{name}: {size} bytes")
+
+              if not videos:
+                  raise SystemExit("ERROR: No se encontro intro.mp4")
+
+              if any(size >= 500000 for _, size in videos):
+                  raise SystemExit("ERROR: Todavia existe un video intro grande")
+          PY
+
+          echo "=== MANIFIESTO / PACKAGE / SDK ==="
+          aapt dump badging FAMILY-TV-unsigned.apk | head -n 20
+
+      - name: 13. Alinear, firmar y verificar APK
+        run: |
+          set -euo pipefail
+
           keytool -genkeypair -v \
             -keystore familytv.jks \
             -alias familytv \
@@ -385,10 +444,10 @@ jobs:
 
           apksigner verify --verbose FAMILY-TV.apk
 
-          echo "=== VERIFICACION AAPT BADGING ==="
-          aapt dump badging FAMILY-TV.apk | head -n 15
+          echo "=== BADGING APK FINAL ==="
+          aapt dump badging FAMILY-TV.apk | head -n 20
 
-      - name: 13. Subir reporte de diagnostico
+      - name: 14. Subir reporte de diagnostico
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -396,7 +455,7 @@ jobs:
           path: diagnose-report.txt
           if-no-files-found: warn
 
-      - name: 14. Subir APK final FAMILY TV
+      - name: 15. Subir APK final FAMILY TV
         uses: actions/upload-artifact@v4
         with:
           name: FAMILY-TV-APK
