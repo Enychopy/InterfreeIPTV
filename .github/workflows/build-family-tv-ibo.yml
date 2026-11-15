@@ -1,3 +1,4 @@
+
 name: Build FAMILY TV APK (Rebrand)
 
 on:
@@ -59,7 +60,7 @@ jobs:
           echo "$BUILD_TOOLS_DIR" >> "$GITHUB_PATH"
           echo "Usando build-tools: $BUILD_TOOLS_DIR"
 
-      - name: 5. Descargar APK base (v1.0) y Apktool ${{ env.APKTOOL_VERSION }}
+      - name: 5. Descargar APK base y Apktool
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -74,42 +75,39 @@ jobs:
 
           ls -lh base.apk apktool.jar
 
-      - name: 6. Decompilar base.apk con Apktool
+      - name: 6. Decompilar APK base
         run: |
           set -euo pipefail
           java -Xmx2048m -jar apktool.jar d -f base.apk -o decoded
           ls -la decoded/
 
-      - name: 7. Diagnose real branding and server
+      - name: 7. Diagnosticar marca y servidor
         run: |
           set -euo pipefail
           REPORT="diagnose-report.txt"
           {
-            echo "=========================================="
             echo "DIAGNOSTICO DE MARCA, LAYOUTS Y SERVIDOR"
-            echo "=========================================="
-
-            echo -e "\n[1] PACKAGE Y MANIFEST ORIGINAL:"
+            echo "[1] PACKAGE Y MANIFEST ORIGINAL:"
             head -n 30 decoded/AndroidManifest.xml
 
-            echo -e "\n[2] LAYOUTS QUE REFERENCIAN LOGO / SPLASH / LOGIN:"
+            echo "[2] LAYOUTS:"
             grep -rnE "logo|splash|login|banner|brand" decoded/res/layout* 2>/dev/null || true
 
-            echo -e "\n[3] ARCHIVOS GRAFICOS DE LOGO/ICONO EN RES Y ASSETS:"
+            echo "[3] ARCHIVOS GRAFICOS:"
             find decoded/res decoded/assets -type f \( -iname "*logo*" -o -iname "*banner*" -o -iname "*splash*" -o -iname "*ic_launcher*" \) 2>/dev/null | sort || true
 
-            echo -e "\n[4] STRINGS DE NOMBRE DE APP Y URLs EN res/values:"
+            echo "[4] STRINGS Y URL:"
             grep -rnE "app_name|http://|https://|interfree|liontv|player_api" decoded/res/values* 2>/dev/null || true
 
-            echo -e "\n[5] ENDPOINTS XTREAM (player_api.php / get.php / xmltv.php) EN SMALI:"
+            echo "[5] ENDPOINTS XTREAM:"
             grep -rnE "player_api\.php|get\.php|xmltv\.php" decoded/smali* 2>/dev/null | head -n 60 || true
 
-            echo -e "\n[6] URLs HTTP/HTTPS EN SMALI (EXCLUYENDO SCHEMAS XML Y GOOGLE):"
+            echo "[6] URL EN SMALI:"
             grep -rnEo "https?://[a-zA-Z0-9._:-]+(/[a-zA-Z0-9._~:/?#@!$&'()*+,;=-]*)?" decoded/smali* 2>/dev/null \
               | grep -vE "schemas\.android\.com|w3\.org|xmlpull\.org|apache\.org|googleapis\.com|google\.com|gstatic\.com|facebook\.com|exoplayer" \
               | head -n 80 || true
 
-            echo -e "\n[7] CADENAS HTTP / PORTAL DENTRO DE LIBRERIAS NATIVAS (.so):"
+            echo "[7] URL EN LIBRERIAS:"
             if [ -d "decoded/lib" ]; then
               find decoded/lib -name "*.so" | while read -r sofile; do
                 echo "--- $sofile ---"
@@ -118,7 +116,7 @@ jobs:
             fi
           } | tee "$REPORT"
 
-      - name: 8. Aplicar assets multi-densidad desde familytv_rebrand_payload.zip
+      - name: 8. Aplicar assets FAMILY TV
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -137,16 +135,14 @@ jobs:
           with zipfile.ZipFile(payload_zip, "r") as zf:
               zf.extractall(extract_root)
 
-          # Detectar si el ZIP tiene una carpeta envolvente unica (ej. payload/res/...)
           entries = [p for p in extract_root.iterdir() if p.name != "__MACOSX"]
           if len(entries) == 1 and entries[0].is_dir() and not (extract_root / "res").exists():
               payload_dir = entries[0]
           else:
               payload_dir = extract_root
 
-          print(f"Raiz efectiva del payload: {payload_dir}")
+          print(f"Raiz efectiva: {payload_dir}")
 
-          # Buscar el logo principal de mayor resolucion dentro del payload para fallback
           candidate_logos = []
           for p in payload_dir.rglob("*"):
               if p.is_file() and p.suffix.lower() in {".png", ".webp", ".jpg", ".jpeg"}:
@@ -158,13 +154,12 @@ jobs:
                   candidate_logos.append((score, p))
 
           if not candidate_logos:
-              raise RuntimeError("ERROR: No se encontro ningun archivo de imagen dentro de familytv_rebrand_payload.zip")
+              raise RuntimeError("No se encontro ninguna imagen en el payload")
 
           candidate_logos.sort(key=lambda x: x[0], reverse=True)
           master_logo_path = candidate_logos[0][1]
-          print(f"Logo maestro seleccionado: {master_logo_path}")
 
-          def write_image_matching_format(src_path: Path, dst_path: Path):
+          def write_image_matching_format(src_path, dst_path):
               dst_path.parent.mkdir(parents=True, exist_ok=True)
               ext = dst_path.suffix.lower()
               with Image.open(src_path) as im:
@@ -180,17 +175,14 @@ jobs:
 
           decoded_res = Path("decoded/res")
           replaced_count = 0
-
-          # 1) Copiar estructura res/ del payload hacia drawable* (incluyendo -v4) y mipmap* (incluyendo -v4)
           payload_res = payload_dir / "res"
+
           if payload_res.exists():
               for src_file in payload_res.rglob("*"):
                   if not src_file.is_file() or src_file.suffix.lower() not in {".png", ".webp"}:
                       continue
-                  rel_folder = src_file.parent.name  # ej. drawable-xhdpi o mipmap-hdpi
+                  rel_folder = src_file.parent.name
                   stem = src_file.stem
-
-                  # Buscar carpetas equivalentes en decoded/res (ej. drawable-xhdpi y drawable-xhdpi-v4)
                   matching_dirs = [
                       d for d in decoded_res.iterdir()
                       if d.is_dir() and (d.name == rel_folder or d.name.startswith(rel_folder + "-v"))
@@ -199,7 +191,6 @@ jobs:
                       matching_dirs = [decoded_res / rel_folder]
 
                   for target_dir in matching_dirs:
-                      # Si existe version .webp o .png con ese nombre en la carpeta destino, reemplazarla
                       existing_targets = list(target_dir.glob(f"{stem}.*"))
                       if existing_targets:
                           for existing in existing_targets:
@@ -210,7 +201,6 @@ jobs:
                           write_image_matching_format(src_file, target_dir / src_file.name)
                           replaced_count += 1
 
-          # 2) Barrido de seguridad sobre cualquier logo/banner/ic_launcher existente en decoded/res y decoded/assets
           target_keywords = ("trans_logo", "app_logo", "splash_logo", "ic_logo", "logo", "ic_launcher", "banner")
           for base_folder in [Path("decoded/res"), Path("decoded/assets")]:
               if not base_folder.exists():
@@ -219,24 +209,21 @@ jobs:
                   if not existing.is_file() or existing.suffix.lower() not in {".png", ".webp"}:
                       continue
                   name_low = existing.stem.lower()
-                  # Evitar iconos de sistema/exoplayer (ej. exo_ic_*, abc_*)
                   if name_low.startswith(("exo_", "abc_", "notification_", "googleg_")):
                       continue
                   if any(k == name_low or name_low.startswith(k) or name_low.endswith(k) for k in target_keywords):
-                      # Buscar si el payload tiene una densidad especifica para esta carpeta
                       folder_clean = existing.parent.name.split("-v")[0]
                       specific = payload_res / folder_clean / f"{existing.stem}.png"
                       src_to_use = specific if specific.exists() else master_logo_path
                       write_image_matching_format(src_to_use, existing)
-                      print(f"Reemplazado: {existing} <- {src_to_use.name}")
                       replaced_count += 1
 
-          print(f"Total de archivos graficos actualizados: {replaced_count}")
+          print(f"Total de graficos actualizados: {replaced_count}")
           if replaced_count == 0:
-              raise RuntimeError("ERROR: No se reemplazo ningun asset grafico.")
+              raise RuntimeError("No se reemplazo ningun asset grafico")
           PY
 
-      - name: 9. Aplicar Rebrand (URL http:80, Cleartext, Marca y Package)
+      - name: 9. Aplicar marca, package y servidor
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -249,7 +236,6 @@ jobs:
           target_name = os.environ["TARGET_APP_NAME"]
           target_server = os.environ["TARGET_SERVER"].rstrip("/")
 
-          # 1. Crear res/xml/network_security_config.xml permitiendo cleartext para ultratv-lat.online
           xml_dir = Path("decoded/res/xml")
           xml_dir.mkdir(parents=True, exist_ok=True)
           nsc_path = xml_dir / "network_security_config.xml"
@@ -268,7 +254,6 @@ jobs:
               encoding="utf-8"
           )
 
-          # 2. Actualizar AndroidManifest.xml de forma estructural (sin romper namespaces)
           manifest_path = Path("decoded/AndroidManifest.xml")
           ANDROID_NS = "http://schemas.android.com/apk/res/android"
           ET.register_namespace("android", ANDROID_NS)
@@ -277,20 +262,18 @@ jobs:
           root = tree.getroot()
           old_pkg = root.attrib.get("package", "").strip()
           if not old_pkg:
-              raise RuntimeError("No se pudo leer el package original en AndroidManifest.xml")
+              raise RuntimeError("No se pudo leer el package original")
 
           print(f"Package original: {old_pkg} -> Nuevo: {target_pkg}")
           root.attrib["package"] = target_pkg
 
           app_el = root.find("application")
           if app_el is None:
-              raise RuntimeError("No se encontro <application> en AndroidManifest.xml")
+              raise RuntimeError("No se encontro application")
 
-          # Habilitar HTTP cleartext explicitamente
           app_el.attrib[f"{{{ANDROID_NS}}}usesCleartextTraffic"] = "true"
           app_el.attrib[f"{{{ANDROID_NS}}}networkSecurityConfig"] = "@xml/network_security_config"
 
-          # Calificar nombres relativos (.MainActivity -> old_pkg.MainActivity) para no romper clases Java/Smali
           for elem in app_el.iter():
               name_attr = elem.attrib.get(f"{{{ANDROID_NS}}}name")
               if name_attr and name_attr.startswith("."):
@@ -302,20 +285,14 @@ jobs:
 
           tree.write(manifest_path, encoding="utf-8", xml_declaration=True)
 
-          # 3. Actualizar apktool.yml con renameManifestPackage
           yml_path = Path("decoded/apktool.yml")
           yml_text = yml_path.read_text(encoding="utf-8")
           if "renameManifestPackage:" in yml_text:
-              yml_text = re.sub(
-                  r"renameManifestPackage:\s*.*",
-                  f"renameManifestPackage: {target_pkg}",
-                  yml_text
-              )
+              yml_text = re.sub(r"renameManifestPackage:\s*.*", f"renameManifestPackage: {target_pkg}", yml_text)
           else:
               yml_text += f"\npackageInfo:\n  forcedPackageId: '127'\n  renameManifestPackage: {target_pkg}\n"
           yml_path.write_text(yml_text, encoding="utf-8")
 
-          # 4. Reemplazar marca en res/values*/strings.xml
           for strings_file in Path("decoded/res").rglob("strings.xml"):
               txt = strings_file.read_text(encoding="utf-8", errors="ignore")
               txt = re.sub(r"INTERFREE\s*TV\s*PRO", target_name, txt, flags=re.IGNORECASE)
@@ -323,47 +300,36 @@ jobs:
               txt = re.sub(r"INTERFREE", "FAMILY", txt, flags=re.IGNORECASE)
               strings_file.write_text(txt, encoding="utf-8")
 
-          # 5. Reemplazar URLs de portal IPTV preservando http://ultratv-lat.online:80
-          # Excluimos estrictamente schemas XML, Google, Firebase, Facebook, ExoPlayer y TMDB
           EXCLUDED_HOSTS = (
-              "schemas.android.com",
-              "www.w3.org",
-              "w3.org",
-              "xmlpull.org",
-              "apache.org",
-              "www.apache.org",
-              "googleapis.com",
-              "google.com",
-              "gstatic.com",
-              "googleusercontent.com",
-              "facebook.com",
-              "fbcdn.net",
-              "exoplayer.dev",
-              "themoviedb.org",
-              "tmdb.org",
-              "github.com",
+              "schemas.android.com", "www.w3.org", "w3.org", "xmlpull.org",
+              "apache.org", "www.apache.org", "googleapis.com", "google.com",
+              "gstatic.com", "googleusercontent.com", "facebook.com", "fbcdn.net",
+              "exoplayer.dev", "themoviedb.org", "tmdb.org", "github.com",
               "ultratv-lat.online",
           )
 
           url_pattern = re.compile(r"https?://([a-zA-Z0-9.-]+)(?::\d+)?")
 
-          def replace_portal_url(match: re.Match) -> str:
+          def replace_portal_url(match):
               full = match.group(0)
               host = match.group(1).lower()
               if any(host == ex or host.endswith("." + ex) for ex in EXCLUDED_HOSTS):
                   return full
-              print(f"  URL reemplazada: {full} -> {target_server}")
+              print(f"URL reemplazada: {full} -> {target_server}")
               return target_server
 
           target_extensions = {".smali", ".xml", ".json", ".js", ".properties", ".txt"}
           url_replacements = 0
-          for root_dir in [Path("decoded/smali"), Path("decoded/smali_classes2"), Path("decoded/smali_classes3"), Path("decoded/smali_classes4"), Path("decoded/res"), Path("decoded/assets")]:
+          for root_dir in [
+              Path("decoded/smali"), Path("decoded/smali_classes2"),
+              Path("decoded/smali_classes3"), Path("decoded/smali_classes4"),
+              Path("decoded/res"), Path("decoded/assets")
+          ]:
               if not root_dir.exists():
                   continue
               for fpath in root_dir.rglob("*"):
                   if not fpath.is_file() or fpath.suffix.lower() not in target_extensions:
                       continue
-                  # No tocar network_security_config.xml ni layouts que solo tienen xmlns
                   if fpath.name == "network_security_config.xml":
                       continue
                   content = fpath.read_text(encoding="utf-8", errors="ignore")
@@ -372,16 +338,26 @@ jobs:
                       fpath.write_text(new_content, encoding="utf-8")
                       url_replacements += count
 
-          print(f"Total de URLs de servidor reemplazadas: {url_replacements}")
+          print(f"Total de URLs reemplazadas: {url_replacements}")
           PY
 
-      - name: 10. Reconstruir APK con Apktool
+      - name: 10. Usar video intro pequeño
+        run: |
+          set -euo pipefail
+          test -f decoded/assets/intro.mp4
+          cp decoded/assets/intro.mp4 decoded/intro.mp4
+          test "$(stat -c%s decoded/intro.mp4)" -lt 500000
+          cmp decoded/assets/intro.mp4 decoded/intro.mp4
+          echo "Video intro pequeño aplicado correctamente:"
+          ls -lh decoded/assets/intro.mp4 decoded/intro.mp4
+
+      - name: 11. Reconstruir APK con Apktool
         run: |
           set -euo pipefail
           java -Xmx2048m -jar apktool.jar b decoded -o FAMILY-TV-unsigned.apk
           ls -lh FAMILY-TV-unsigned.apk
 
-      - name: 11. Alinear (zipalign), firmar (apksigner) y verificar APK
+      - name: 12. Alinear, firmar y verificar APK
         run: |
           set -euo pipefail
           keytool -genkeypair -v \
@@ -412,7 +388,7 @@ jobs:
           echo "=== VERIFICACION AAPT BADGING ==="
           aapt dump badging FAMILY-TV.apk | head -n 15
 
-      - name: 12. Subir reporte de diagnostico (siempre)
+      - name: 13. Subir reporte de diagnostico
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -420,7 +396,7 @@ jobs:
           path: diagnose-report.txt
           if-no-files-found: warn
 
-      - name: 13. Subir APK final FAMILY-TV
+      - name: 14. Subir APK final FAMILY TV
         uses: actions/upload-artifact@v4
         with:
           name: FAMILY-TV-APK
