@@ -1,5 +1,5 @@
 
-name: Build FAMILY TV - Original IBO Player
+name: Build FAMILY TV - Independent IBO Player
 
 on:
   workflow_dispatch:
@@ -31,14 +31,9 @@ jobs:
       - name: Locate Android tools
         run: |
           BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
-
-          if [ -z "$BUILD_TOOLS" ]; then
-            echo "Android build tools not found"
-            exit 1
-          fi
-
+          test -n "$BUILD_TOOLS"
           echo "$BUILD_TOOLS" >> "$GITHUB_PATH"
-          echo "Using Android tools: $BUILD_TOOLS"
+          echo "Using $BUILD_TOOLS"
 
       - name: Download FAMILY TV source
         run: |
@@ -51,13 +46,26 @@ jobs:
           test -f source/ibo-decoded/apktool.yml
           test -f source/ibo-decoded/AndroidManifest.xml
 
+      - name: Set independent application ID
+        run: |
+          MANIFEST="source/ibo-decoded/AndroidManifest.xml"
+
+          sed -i 's/com.apps.red4tv/com.familytv.player/g' "$MANIFEST"
+
+          grep -q 'package="com.familytv.player"' "$MANIFEST"
+          grep -q 'com.familytv.player.provider' "$MANIFEST"
+          grep -q 'com.familytv.player.firebaseinitprovider' "$MANIFEST"
+          grep -q 'com.familytv.player.androidx-startup' "$MANIFEST"
+
+          echo "Independent package configured successfully"
+
       - name: Download Apktool
         run: |
           curl -fL --retry 3 \
             "https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar" \
             -o apktool.jar
 
-      - name: Rebuild original IBO Player
+      - name: Rebuild IBO Player
         run: |
           java -jar apktool.jar b source/ibo-decoded \
             -o FAMILY_TV-unsigned.apk
@@ -88,9 +96,13 @@ jobs:
 
           apksigner verify --verbose FAMILY_TV.apk
 
+      - name: Verify independent package
+        run: |
+          aapt dump badging FAMILY_TV.apk | grep "package: name='com.familytv.player'"
+
       - name: Upload FAMILY TV APK
         uses: actions/upload-artifact@v4
         with:
-          name: FAMILY-TV-IBO-APK
+          name: FAMILY-TV-INDEPENDENT-APK
           path: FAMILY_TV.apk
           if-no-files-found: error
