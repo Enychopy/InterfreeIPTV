@@ -30,10 +30,14 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platform-tools
+            build-tools;35.0.0
+            platforms;android-35
 
-      - name: Install Android build tools
+      - name: Add build tools to PATH
         run: |
-          sdkmanager "build-tools;35.0.0"
           echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
 
       - name: Download FAMILY TV source
