@@ -1,0 +1,37 @@
+
+name: Inspect IBO Player APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  decode:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download original APK
+        run: |
+          API="https://api.github.com/repos/Enychopy/InterfreeIPTV/releases/tags/ibo-original-v2"
+          curl -fsSL "$API" -o release.json
+          URL=$(jq -r '.assets[] | select(.name=="Red4TV_1.38.apk") | .browser_download_url' release.json)
+          test -n "$URL" && test "$URL" != "null"
+          curl -fL "$URL" -o original.apk
+
+      - name: Install Apktool
+        run: |
+          curl -fL https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar -o apktool.jar
+          java -jar apktool.jar --version
+
+      - name: Decompile IBO PLAYER
+        run: |
+          java -jar apktool.jar d -f original.apk -o ibo-decoded
+          zip -qr IBO-DECOMPILED.zip ibo-decoded
+
+      - name: Save decoded project
+        uses: actions/upload-artifact@v4
+        with:
+          name: IBO-PLAYER-DECOMPILED
+          path: IBO-DECOMPILED.zip
+          retention-days: 7
