@@ -3,6 +3,11 @@ name: Build FAMILY TV - Original IBO Player
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - family-tv
+    paths:
+      - '.github/workflows/build-family-tv-ibo.yml'
 
 permissions:
   contents: read
@@ -12,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout branch
+      - name: Checkout family-tv
         uses: actions/checkout@v4
         with:
           ref: family-tv
@@ -26,7 +31,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install build tools
+      - name: Install Android build tools
         run: |
           sdkmanager "build-tools;35.0.0"
           echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
@@ -48,7 +53,7 @@ jobs:
             "https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar" \
             -o apktool.jar
 
-      - name: Rebuild original IBO Player
+      - name: Rebuild IBO Player
         run: |
           java -jar apktool.jar b source/ibo-decoded \
             -o FAMILY_TV-unsigned.apk
@@ -79,9 +84,9 @@ jobs:
 
           apksigner verify --verbose FAMILY_TV.apk
 
-      - name: Upload FAMILY TV APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FAMILY-TV-APK
+          name: FAMILY-TV-IBO-APK
           path: FAMILY_TV.apk
           if-no-files-found: error
